@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="sl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChatGPT Readiness Checker</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero hero-full">
+        <div class="hero-inner">
+          <div class="hero-copy-wrap">
+            <p class="eyebrow">AI Visibility Audit</p>
+            <h1>Preveri AI pripravljenost svoje strani</h1>
+            <p class="hero-copy">
+              Hiter audit za ChatGPT pregledovanje, crawl dostopnost, vsebinsko berljivost in jasen
+              seznam izboljšav.
+            </p>
+          </div>
+          <div class="hero-stats">
+            <article class="hero-stat">
+              <span class="hero-stat-value">5</span>
+              <span class="hero-stat-label">brezplačnih crawl strani</span>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat-value">12+</span>
+              <span class="hero-stat-label">ključnih SEO + AI signalov</span>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat-value">PDF</span>
+              <span class="hero-stat-label">poročilo po emailu</span>
+            </article>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel input-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Workspace</p>
+              <h2>Zaženi analizo</h2>
+            </div>
+            <span class="panel-badge">SEOS Mode</span>
+          </div>
+
+          <form id="analyze-form" class="analyze-form">
+            <label for="url-input">Naslovi spletnih strani</label>
+            <textarea
+              id="url-input"
+              name="url"
+              rows="7"
+              placeholder="https://example.com&#10;https://example.com/blog/objava&#10;moja-domena.si"
+              required
+            ></textarea>
+            <div class="input-grid">
+              <div>
+                <label for="profile-select">Tip strani</label>
+                <select id="profile-select" name="profile">
+                  <option value="general">Splošna stran</option>
+                  <option value="blog">Blog / članek</option>
+                  <option value="shop">Trgovina / produkt</option>
+                  <option value="landing">Landing page</option>
+                </select>
+              </div>
+              <div>
+                <label for="mode-select">Način</label>
+                <select id="mode-select" name="mode">
+                  <option value="analyze">Analiza vnesenih URL-jev</option>
+                  <option value="crawl">Samodejni crawl ene domene</option>
+                </select>
+              </div>
+              <div>
+                <label for="crawl-limit-select">Število crawl strani</label>
+                <select id="crawl-limit-select" name="crawlLimit">
+                  <option value="5">5 strani brezplačno</option>
+                  <option value="10">10 strani Premium</option>
+                  <option value="25">25 strani Premium</option>
+                </select>
+              </div>
+              <button type="submit" id="submit-button">Analiziraj</button>
+            </div>
+            <p class="form-hint">
+              Vnesi en URL na vrstico. V načinu crawl zadošča en začetni URL, aplikacija pa poskusi
+              sama poiskati več podstrani iz iste domene.
+            </p>
+            <div id="upgrade-card" class="upgrade-card">
+              <p class="upgrade-title">Premium crawl odklene več podstrani.</p>
+              <p class="upgrade-copy">Brezplačno dobiš 5 strani, za 10 ali 25 pa odkleneš dodatni obseg.</p>
+              <button type="button" id="upgrade-button" class="secondary-button">Odkleni več strani</button>
+              <p id="upgrade-status" class="upgrade-status"></p>
+            </div>
+          </form>
+
+          <div class="legend">
+            <div>
+              <span class="legend-dot strong"></span>
+              <span>85-100: odlično pripravljena</span>
+            </div>
+            <div>
+              <span class="legend-dot good"></span>
+              <span>70-84: dobro pripravljena</span>
+            </div>
+            <div>
+              <span class="legend-dot medium"></span>
+              <span>50-69: delno pripravljena</span>
+            </div>
+            <div>
+              <span class="legend-dot weak"></span>
+              <span>0-49: potrebne večje izboljšave</span>
+            </div>
+          </div>
+
+          <section class="history-panel">
+            <div class="section-heading">
+              <h3>Zgodovina analiz</h3>
+              <p>Pretekli pregledi se shranijo lokalno v ta brskalnik.</p>
+            </div>
+            <div id="history-list" class="history-list">
+              <p class="history-empty">Zgodovina je še prazna.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel results-panel">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-illustration"></div>
+            <h2>Rezultati se prikažejo tukaj</h2>
+            <p>
+              Po analizi dobiš skupno oceno, podrobne tehnične preglede in seznam najpomembnejših
+              naslednjih korakov.
+            </p>
+          </div>
+
+          <div id="loading-state" class="loading-state hidden">
+            <div class="loader"></div>
+            <p>Preverjam dostopnost, robots pravila in vsebino strani ...</p>
+          </div>
+
+          <div id="error-state" class="error-state hidden"></div>
+
+          <div id="result-state" class="result-state hidden">
+            <section class="toolbar">
+              <div>
+                <p class="card-label">Pošlji poročilo po emailu</p>
+                <p class="toolbar-copy">PDF poročilo pošljemo na vpisan email in kopijo na peter@seos.si.</p>
+              </div>
+              <div class="toolbar-actions">
+                <input id="email-input" type="email" placeholder="ime@podjetje.si" />
+                <button id="email-report" type="button" class="secondary-button">Pošlji PDF</button>
+              </div>
+            </section>
+
+            <section class="comparison-section">
+              <div class="section-heading">
+                <h3>Primerjava URL-jev</h3>
+                <p>Če vneseš več strani, dobiš hiter primerjalni pogled po oceni in ključnih signalih.</p>
+              </div>
+              <div class="comparison-table-wrap">
+                <table class="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>URL</th>
+                      <th>Profil</th>
+                      <th>Ocena</th>
+                      <th>Status</th>
+                      <th>robots</th>
+                      <th>Sitemap</th>
+                      <th>Besede</th>
+                    </tr>
+                  </thead>
+                  <tbody id="comparison-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="score-card">
+              <div>
+                <p class="card-label">Skupna ocena</p>
+                <div class="score-row">
+                  <span id="score-value" class="score-value">0</span>
+                  <span class="score-total">/100</span>
+                </div>
+                <p id="score-label" class="score-label"></p>
+              </div>
+              <div class="score-summary">
+                <h2 id="result-title"></h2>
+                <p id="result-description"></p>
+                <p id="result-profile" class="result-profile"></p>
+              </div>
+            </section>
+
+            <section class="metrics-grid" id="metrics-grid"></section>
+
+            <section class="checks-section">
+              <div class="section-heading">
+                <h3>Podrobni pregledi</h3>
+                <p>Vsak signal prispeva k skupni pripravljenosti strani za AI pregledovanje.</p>
+              </div>
+              <div id="checks-list" class="checks-list"></div>
+            </section>
+
+            <section class="recommendations-section">
+              <div class="section-heading">
+                <h3>Najpomembnejše izboljšave</h3>
+                <p>To so predlogi z največjim vplivom na oceno in berljivost strani.</p>
+              </div>
+              <ol id="recommendations-list" class="recommendations-list"></ol>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p>
+          Orodje je narejeno s ChatGPT. Ne shranjujemo nobenih podatkov. Za orodjem stoji
+          <a href="https://seos.si" target="_blank" rel="noreferrer">SEOS group d.o.o.</a>
+        </p>
+      </footer>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+  </html>

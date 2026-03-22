@@ -1,0 +1,15 @@
+{
+  "name": "gptindex-readiness-checker",
+  "version": "1.0.0",
+  "description": "A lightweight app for checking how ready a website is for ChatGPT-style crawling and summarization.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/analyzer.test.js"
+  },
+  "dependencies": {
+    "nodemailer": "^8.0.3",
+    "pdf-lib": "^1.17.1"
+  }
+}
