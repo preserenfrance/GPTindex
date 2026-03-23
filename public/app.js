@@ -11,6 +11,8 @@ const crawlLimitSelect = document.querySelector("#crawl-limit-select");
 const submitButton = document.querySelector("#submit-button");
 const emailInput = document.querySelector("#email-input");
 const emailReportButton = document.querySelector("#email-report");
+const emailConsent = document.querySelector("#email-consent");
+const emailFeedback = document.querySelector("#email-feedback");
 const historyList = document.querySelector("#history-list");
 const upgradeButton = document.querySelector("#upgrade-button");
 const upgradeStatus = document.querySelector("#upgrade-status");
@@ -35,6 +37,17 @@ let latestRunMeta = { mode: "analyze", profileLabel: "Splošna stran" };
 let unlockedCheckoutSessionId = localStorage.getItem(STRIPE_UNLOCK_KEY) || "";
 
 emailReportButton.disabled = true;
+
+function setEmailFeedback(message = "", tone = "success") {
+  if (!message) {
+    emailFeedback.textContent = "";
+    emailFeedback.className = "email-feedback hidden";
+    return;
+  }
+
+  emailFeedback.textContent = message;
+  emailFeedback.className = `email-feedback ${tone}`;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -250,17 +263,27 @@ async function createCheckoutSession(url) {
 async function sendEmailReport() {
   const email = emailInput.value.trim();
   if (!email) {
+    setEmailFeedback("Vnesite email naslov za pošiljanje PDF poročila.", "error");
     errorState.textContent = "Vnesite email naslov za pošiljanje PDF poročila.";
     showState("error");
     return;
   }
 
   if (!latestResults.length) {
+    setEmailFeedback("Najprej zaženite analizo ali crawl.", "error");
     errorState.textContent = "Najprej zaženite analizo ali crawl.";
     showState("error");
     return;
   }
 
+  if (!emailConsent.checked) {
+    setEmailFeedback("Pred pošiljanjem morate potrditi soglasje za uporabo e-maila za obveščanje o novostih.", "error");
+    errorState.textContent = "Potrdite soglasje za uporabo e-maila za obveščanje o novostih.";
+    showState("error");
+    return;
+  }
+
+  setEmailFeedback("");
   emailReportButton.disabled = true;
   emailReportButton.textContent = "Pošiljam ...";
 
@@ -280,8 +303,10 @@ async function sendEmailReport() {
 
     showState("result");
     errorState.textContent = "";
+    setEmailFeedback(`PDF poročilo je bilo uspešno poslano na ${response.sentTo}.`, "success");
     upgradeStatus.textContent = `PDF poročilo je poslano na ${response.sentTo}, kopija pa na ${response.copiedTo}.`;
   } catch (error) {
+    setEmailFeedback(error instanceof Error ? error.message : "Pošiljanje emaila ni uspelo.", "error");
     errorState.textContent = error instanceof Error ? error.message : "Pošiljanje emaila ni uspelo.";
     showState("error");
   } finally {
@@ -410,6 +435,7 @@ async function handleSubmit(event) {
 
     emailReportButton.disabled = false;
     updateUpgradeStatus();
+    setEmailFeedback("");
     showState("result");
   } catch (error) {
     latestResults = [];

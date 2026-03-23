@@ -544,6 +544,28 @@ select:focus-visible {
   margin-bottom: 20px;
 }
 
+.email-feedback {
+  margin: -4px 0 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(77, 133, 240, 0.18);
+  background: rgba(238, 243, 255, 0.96);
+  color: var(--bg-deep);
+  box-shadow: var(--shadow-sm);
+}
+
+.email-feedback.success {
+  border-color: rgba(33, 74, 166, 0.18);
+  background: rgba(238, 243, 255, 0.96);
+  color: var(--bg-deep);
+}
+
+.email-feedback.error {
+  border-color: rgba(234, 128, 66, 0.22);
+  background: rgba(255, 244, 238, 0.96);
+  color: #b85e2c;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -566,6 +588,23 @@ select:focus-visible {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.consent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.consent-row input {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--bg-deep);
 }
 
 .toolbar-actions input {
