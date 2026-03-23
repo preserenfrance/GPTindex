@@ -434,8 +434,22 @@ export async function handleRequest(request, response) {
           from: EMAIL_FROM,
           to: email,
           cc: EMAIL_COPY_TO,
-          subject: "ChatGPT readiness report",
-          text: "V priponki posiljam PDF porocilo analize spletne strani. Kopija je bila poslana tudi na peter@seos.si.",
+          subject: "Vaše AI readiness poročilo",
+          text: [
+            "Pozdravljeni,",
+            "",
+            "v priponki pošiljamo PDF poročilo analize vaše spletne strani.",
+            "V poročilu so zbrani ključni AI in tehnični kriteriji, skupna ocena ter priporočila za izboljšave.",
+            "",
+            "Lep pozdrav,",
+            "SEOS group d.o.o."
+          ].join("\n"),
+          html: [
+            "<p>Pozdravljeni,</p>",
+            "<p>v priponki pošiljamo PDF poročilo analize vaše spletne strani.</p>",
+            "<p>V poročilu so zbrani ključni AI in tehnični kriteriji, skupna ocena ter priporočila za izboljšave.</p>",
+            "<p>Lep pozdrav,<br />SEOS group d.o.o.</p>"
+          ].join(""),
           attachments: [
             {
               filename: "chatgpt-readiness-report.pdf",
