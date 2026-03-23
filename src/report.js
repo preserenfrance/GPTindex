@@ -1,19 +1,12 @@
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { join } from "node:path";
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb } from "pdf-lib";
 
 const FONT_CANDIDATES = {
-  regular: [
-    "C:\\Windows\\Fonts\\arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf"
-  ],
-  bold: [
-    "C:\\Windows\\Fonts\\arialbd.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"
-  ]
+  regular: [join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf")],
+  bold: [join(process.cwd(), "assets", "fonts", "NotoSans-Bold.ttf")]
 };
 
 const PAGE_SIZE = [595, 842];
@@ -56,12 +49,39 @@ function createPage(pdf) {
   return pdf.addPage(PAGE_SIZE);
 }
 
+function drawPageShell(state) {
+  state.page.drawRectangle({
+    x: 0,
+    y: 0,
+    width: PAGE_SIZE[0],
+    height: PAGE_SIZE[1],
+    color: rgb(0.985, 0.99, 1)
+  });
+
+  state.page.drawRectangle({
+    x: 0,
+    y: PAGE_SIZE[1] - 10,
+    width: PAGE_SIZE[0],
+    height: 10,
+    color: state.colors.primary
+  });
+
+  state.page.drawRectangle({
+    x: PAGE_SIZE[0] - 110,
+    y: PAGE_SIZE[1] - 120,
+    width: 160,
+    height: 160,
+    color: state.colors.accentSoft
+  });
+}
+
 function ensureSpace(state, neededHeight = 24) {
   if (state.y - neededHeight >= BOTTOM_Y) {
     return;
   }
 
   state.page = createPage(state.pdf);
+  drawPageShell(state);
   state.y = TOP_Y;
 }
 
@@ -139,6 +159,33 @@ function drawSectionTitle(state, title) {
   state.y -= 18;
 }
 
+function drawMetricCard(state, x, y, width, title, value, variant = "primary") {
+  const isAccent = variant === "accent";
+  state.page.drawRectangle({
+    x,
+    y,
+    width,
+    height: 60,
+    color: isAccent ? state.colors.accentSoft : state.colors.primarySoft
+  });
+
+  state.page.drawText(title, {
+    x: x + 12,
+    y: y + 40,
+    size: 8,
+    font: state.fonts.bold,
+    color: state.colors.muted
+  });
+
+  state.page.drawText(String(value), {
+    x: x + 12,
+    y: y + 16,
+    size: 15,
+    font: state.fonts.bold,
+    color: isAccent ? state.colors.accent : state.colors.primary
+  });
+}
+
 function drawCheckRow(state, check) {
   ensureSpace(state, 34);
 
@@ -202,34 +249,58 @@ export async function createReportPdf({ mode, profileLabel, results }) {
     colors
   };
 
+  drawPageShell(state);
+
   state.page.drawRectangle({
     x: MARGIN_X - 2,
-    y: 754,
+    y: 740,
     width: 512,
-    height: 56,
+    height: 70,
     color: colors.primary
   });
 
   state.page.drawText("ChatGPT Readiness Report", {
     x: MARGIN_X + 12,
-    y: 782,
-    size: 22,
+    y: 778,
+    size: 24,
     font: fonts.bold,
     color: colors.white
   });
 
   state.page.drawText(`Profil: ${profileLabel} | Način: ${mode === "crawl" ? "crawl domene" : "ročna analiza"}`, {
     x: MARGIN_X + 12,
-    y: 764,
+    y: 758,
     size: 10,
     font: fonts.regular,
     color: colors.white
   });
 
-  state.y = 724;
+  if (results[0]) {
+    drawMetricCard(state, MARGIN_X, 650, 154, "NAJBOLJŠA OCENA", `${results[0].score}/100`);
+    drawMetricCard(state, MARGIN_X + 168, 650, 154, "PREGLEDANI URL-JI", results.length);
+    drawMetricCard(
+      state,
+      MARGIN_X + 336,
+      650,
+      174,
+      "NAČIN",
+      mode === "crawl" ? "Crawl domene" : "Ročna analiza",
+      "accent"
+    );
+  }
+
+  state.y = 622;
 
   for (const [index, result] of results.slice(0, 10).entries()) {
     ensureSpace(state, 160);
+
+    state.page.drawRectangle({
+      x: MARGIN_X - 4,
+      y: state.y - 8,
+      width: 518,
+      height: 30,
+      color: index % 2 === 0 ? colors.primarySoft : colors.accentSoft
+    });
 
     state.page.drawText(`${index + 1}. ${result.summary.title}`, {
       x: MARGIN_X,
@@ -241,7 +312,7 @@ export async function createReportPdf({ mode, profileLabel, results }) {
 
     state.page.drawText(result.url, {
       x: MARGIN_X,
-      y: state.y - 16,
+      y: state.y - 20,
       size: 9,
       font: fonts.regular,
       color: colors.muted
@@ -255,7 +326,7 @@ export async function createReportPdf({ mode, profileLabel, results }) {
       color: colors.primary
     });
 
-    state.y -= 40;
+    state.y -= 48;
 
     drawWrappedText(state, result.summary.description, {
       maxWidth: 500,
@@ -294,6 +365,14 @@ export async function createReportPdf({ mode, profileLabel, results }) {
 
     state.y -= 18;
   }
+
+  state.page.drawText("Prepared by SEOS group d.o.o.", {
+    x: MARGIN_X,
+    y: 24,
+    size: 9,
+    font: fonts.regular,
+    color: colors.muted
+  });
 
   return Buffer.from(await pdf.save());
 }
