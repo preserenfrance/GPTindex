@@ -1,8 +1,18 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
+function toPdfSafeText(value) {
+  return String(value)
+    .replaceAll("č", "c")
+    .replaceAll("Č", "C")
+    .replaceAll("š", "s")
+    .replaceAll("Š", "S")
+    .replaceAll("ž", "z")
+    .replaceAll("Ž", "Z");
+}
+
 function drawWrappedText(page, text, options) {
   const { x, y, maxWidth, lineHeight, font, size, color } = options;
-  const words = String(text).split(/\s+/);
+  const words = toPdfSafeText(text).split(/\s+/);
   const lines = [];
   let current = "";
 
@@ -57,7 +67,7 @@ export async function createReportPdf({ mode, profileLabel, results }) {
     color: rgb(1, 1, 1)
   });
 
-  page.drawText(`Profil: ${profileLabel} | Nacin: ${mode === "crawl" ? "crawl domene" : "rocna analiza"}`, {
+  page.drawText(`Profil: ${toPdfSafeText(profileLabel)} | Nacin: ${mode === "crawl" ? "crawl domene" : "rocna analiza"}`, {
     x: 56,
     y: 762,
     size: 10,
@@ -72,14 +82,14 @@ export async function createReportPdf({ mode, profileLabel, results }) {
       page = pdf.addPage([595, 842]);
     }
 
-    page.drawText(`${index + 1}. ${result.summary.title}`, {
+    page.drawText(`${index + 1}. ${toPdfSafeText(result.summary.title)}`, {
       x: 48,
       y,
       size: 14,
       font: bold,
       color: dark
     });
-    page.drawText(`${result.url}`, {
+    page.drawText(toPdfSafeText(result.url), {
       x: 48,
       y: y - 16,
       size: 9,
@@ -100,7 +110,7 @@ export async function createReportPdf({ mode, profileLabel, results }) {
       height: 18,
       color: orange
     });
-    page.drawText(result.verdict.label, {
+    page.drawText(toPdfSafeText(result.verdict.label), {
       x: 54,
       y: y - 32,
       size: 9,
