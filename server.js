@@ -252,223 +252,230 @@ async function serveStatic(request, response) {
   }
 }
 
-export function createAppServer() {
-  return createServer(async (request, response) => {
-    try {
-      if (!request.url) {
-        sendJson(response, 400, { error: "Manjka URL zahteve." });
-        return;
-      }
-
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type"
-        });
-        response.end();
-        return;
-      }
-
-      const url = new URL(request.url, `http://${request.headers.host}`);
-
-      if (url.pathname === "/api/analyze" && request.method === "GET") {
-        const target = url.searchParams.get("url");
-        const profile = url.searchParams.get("profile") || "general";
-
-        if (!target) {
-          sendJson(response, 400, { error: "Vnesite URL spletne strani." });
-          return;
-        }
-
-        try {
-          const result = await analyzeUrl(target, profile);
-          sendJson(response, 200, result);
-        } catch (error) {
-          sendJson(response, 500, {
-            error: error instanceof Error ? error.message : "Analiza ni uspela."
-          });
-        }
-        return;
-      }
-
-      if (url.pathname === "/api/crawl" && request.method === "GET") {
-        const target = url.searchParams.get("url");
-        const profile = url.searchParams.get("profile") || "general";
-        const requestedLimit = Math.min(Number(url.searchParams.get("limit") || FREE_CRAWL_LIMIT), MAX_UNLOCKED_CRAWL_LIMIT);
-        const checkoutSessionId = url.searchParams.get("checkoutSessionId");
-
-        if (!target) {
-          sendJson(response, 400, { error: "Vnesite začetni URL za crawl." });
-          return;
-        }
-
-        try {
-          let allowedLimit = FREE_CRAWL_LIMIT;
-
-          if (requestedLimit > FREE_CRAWL_LIMIT) {
-            if (!checkoutSessionId) {
-              sendJson(response, 402, {
-                error: "Brezplačni crawl omogoča do 5 strani.",
-                requiresUpgrade: true,
-                freeLimit: FREE_CRAWL_LIMIT
-              });
-              return;
-            }
-
-            const session = await getCheckoutSession(checkoutSessionId);
-            const isPaidUpgrade =
-              session.payment_status === "paid" &&
-              session.metadata?.feature === "crawl_upgrade";
-
-            if (!isPaidUpgrade) {
-              sendJson(response, 402, {
-                error: "Plačilo za dodatne strani ni bilo potrjeno.",
-                requiresUpgrade: true,
-                freeLimit: FREE_CRAWL_LIMIT
-              });
-              return;
-            }
-
-            allowedLimit = MAX_UNLOCKED_CRAWL_LIMIT;
-          }
-
-          const finalLimit = Math.min(requestedLimit, allowedLimit);
-          const urls = await discoverUrls(target, finalLimit);
-          const results = await Promise.all(urls.map((entry) => analyzeUrl(entry, profile)));
-          results.sort((a, b) => b.score - a.score);
-
-          sendJson(response, 200, {
-            seedUrl: normalizeUrlInput(target),
-            profile,
-            freeLimit: FREE_CRAWL_LIMIT,
-            requestedLimit,
-            allowedLimit: finalLimit,
-            crawledCount: results.length,
-            urls,
-            results
-          });
-        } catch (error) {
-          sendJson(response, 500, {
-            error: error instanceof Error ? error.message : "Crawl ni uspel."
-          });
-        }
-        return;
-      }
-
-      if (url.pathname === "/api/checkout-session" && request.method === "GET") {
-        const target = url.searchParams.get("url");
-
-        if (!target) {
-          sendJson(response, 400, { error: "Za checkout je potreben začetni URL." });
-          return;
-        }
-
-        try {
-          const session = await createCheckoutSession(target);
-          sendJson(response, 200, {
-            checkoutUrl: session.url,
-            sessionId: session.id
-          });
-        } catch (error) {
-          sendJson(response, 500, {
-            error: error instanceof Error ? error.message : "Stripe checkout ni uspel."
-          });
-        }
-        return;
-      }
-
-      if (url.pathname === "/api/checkout-session-status" && request.method === "GET") {
-        const sessionId = url.searchParams.get("session_id");
-
-        if (!sessionId) {
-          sendJson(response, 400, { error: "Manjka session_id." });
-          return;
-        }
-
-        try {
-          const session = await getCheckoutSession(sessionId);
-          sendJson(response, 200, {
-            sessionId: session.id,
-            paymentStatus: session.payment_status,
-            isUpgradePaid:
-              session.payment_status === "paid" && session.metadata?.feature === "crawl_upgrade"
-          });
-        } catch (error) {
-          sendJson(response, 500, {
-            error: error instanceof Error ? error.message : "Preverjanje Stripe seje ni uspelo."
-          });
-        }
-        return;
-      }
-
-      if (url.pathname === "/api/email-report" && request.method === "POST") {
-        try {
-          const payload = await readJsonBody(request);
-          const email = String(payload.email || "").trim();
-          const results = Array.isArray(payload.results) ? payload.results : [];
-          const mode = payload.mode === "crawl" ? "crawl" : "analyze";
-          const profileLabel = String(payload.profileLabel || "Splošna stran");
-
-          if (!email) {
-            sendJson(response, 400, { error: "Vnesite email naslov." });
-            return;
-          }
-
-          if (!results.length) {
-            sendJson(response, 400, { error: "Ni rezultatov za pošiljanje." });
-            return;
-          }
-
-          const pdfBuffer = await createReportPdf({
-            mode,
-            profileLabel,
-            results
-          });
-
-          const mailer = getMailer();
-          await mailer.sendMail({
-            from: EMAIL_FROM,
-            to: email,
-            cc: EMAIL_COPY_TO,
-            subject: "ChatGPT readiness report",
-            text: "V priponki posiljam PDF porocilo analize spletne strani. Kopija je bila poslana tudi na peter@seos.si.",
-            attachments: [
-              {
-                filename: "chatgpt-readiness-report.pdf",
-                content: pdfBuffer,
-                contentType: "application/pdf"
-              }
-            ]
-          });
-
-          sendJson(response, 200, {
-            success: true,
-            sentTo: email,
-            copiedTo: EMAIL_COPY_TO
-          });
-        } catch (error) {
-          sendJson(response, 500, {
-            error: error instanceof Error ? error.message : "Posiljanje emaila ni uspelo."
-          });
-        }
-        return;
-      }
-
-      await serveStatic(request, response);
-    } catch (error) {
-      const isApiRequest = Boolean(request.url?.startsWith("/api/"));
-      if (isApiRequest) {
-        sendJson(response, 500, {
-          error: error instanceof Error ? error.message : "Nepričakovana napaka pri API obdelavi."
-        });
-        return;
-      }
-
-      response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Server error");
+export async function handleRequest(request, response) {
+  try {
+    if (!request.url) {
+      sendJson(response, 400, { error: "Manjka URL zahteve." });
+      return;
     }
-  });
+
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS, POST",
+        "Access-Control-Allow-Headers": "Content-Type"
+      });
+      response.end();
+      return;
+    }
+
+    const url = new URL(request.url, `http://${request.headers.host}`);
+
+    if (url.pathname === "/api/analyze" && request.method === "GET") {
+      const target = url.searchParams.get("url");
+      const profile = url.searchParams.get("profile") || "general";
+
+      if (!target) {
+        sendJson(response, 400, { error: "Vnesite URL spletne strani." });
+        return;
+      }
+
+      try {
+        const result = await analyzeUrl(target, profile);
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Analiza ni uspela."
+        });
+        return;
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/crawl" && request.method === "GET") {
+      const target = url.searchParams.get("url");
+      const profile = url.searchParams.get("profile") || "general";
+      const requestedLimit = Math.min(Number(url.searchParams.get("limit") || FREE_CRAWL_LIMIT), MAX_UNLOCKED_CRAWL_LIMIT);
+      const checkoutSessionId = url.searchParams.get("checkoutSessionId");
+
+      if (!target) {
+        sendJson(response, 400, { error: "Vnesite začetni URL za crawl." });
+        return;
+      }
+
+      try {
+        let allowedLimit = FREE_CRAWL_LIMIT;
+
+        if (requestedLimit > FREE_CRAWL_LIMIT) {
+          if (!checkoutSessionId) {
+            sendJson(response, 402, {
+              error: "Brezplačni crawl omogoča do 5 strani.",
+              requiresUpgrade: true,
+              freeLimit: FREE_CRAWL_LIMIT
+            });
+            return;
+          }
+
+          const session = await getCheckoutSession(checkoutSessionId);
+          const isPaidUpgrade =
+            session.payment_status === "paid" &&
+            session.metadata?.feature === "crawl_upgrade";
+
+          if (!isPaidUpgrade) {
+            sendJson(response, 402, {
+              error: "Plačilo za dodatne strani ni bilo potrjeno.",
+              requiresUpgrade: true,
+              freeLimit: FREE_CRAWL_LIMIT
+            });
+            return;
+          }
+
+          allowedLimit = MAX_UNLOCKED_CRAWL_LIMIT;
+        }
+
+        const finalLimit = Math.min(requestedLimit, allowedLimit);
+        const urls = await discoverUrls(target, finalLimit);
+        const results = await Promise.all(urls.map((entry) => analyzeUrl(entry, profile)));
+        results.sort((a, b) => b.score - a.score);
+
+        sendJson(response, 200, {
+          seedUrl: normalizeUrlInput(target),
+          profile,
+          freeLimit: FREE_CRAWL_LIMIT,
+          requestedLimit,
+          allowedLimit: finalLimit,
+          crawledCount: results.length,
+          urls,
+          results
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Crawl ni uspel."
+        });
+        return;
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/checkout-session" && request.method === "GET") {
+      const target = url.searchParams.get("url");
+
+      if (!target) {
+        sendJson(response, 400, { error: "Za checkout je potreben začetni URL." });
+        return;
+      }
+
+      try {
+        const session = await createCheckoutSession(target);
+        sendJson(response, 200, {
+          checkoutUrl: session.url,
+          sessionId: session.id
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Stripe checkout ni uspel."
+        });
+        return;
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/checkout-session-status" && request.method === "GET") {
+      const sessionId = url.searchParams.get("session_id");
+
+      if (!sessionId) {
+        sendJson(response, 400, { error: "Manjka session_id." });
+        return;
+      }
+
+      try {
+        const session = await getCheckoutSession(sessionId);
+        sendJson(response, 200, {
+          sessionId: session.id,
+          paymentStatus: session.payment_status,
+          isUpgradePaid:
+            session.payment_status === "paid" && session.metadata?.feature === "crawl_upgrade"
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Preverjanje Stripe seje ni uspelo."
+        });
+        return;
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/email-report" && request.method === "POST") {
+      try {
+        const payload = await readJsonBody(request);
+        const email = String(payload.email || "").trim();
+        const results = Array.isArray(payload.results) ? payload.results : [];
+        const mode = payload.mode === "crawl" ? "crawl" : "analyze";
+        const profileLabel = String(payload.profileLabel || "Splošna stran");
+
+        if (!email) {
+          sendJson(response, 400, { error: "Vnesite email naslov." });
+          return;
+        }
+
+        if (!results.length) {
+          sendJson(response, 400, { error: "Ni rezultatov za pošiljanje." });
+          return;
+        }
+
+        const pdfBuffer = await createReportPdf({
+          mode,
+          profileLabel,
+          results
+        });
+
+        const mailer = getMailer();
+        await mailer.sendMail({
+          from: EMAIL_FROM,
+          to: email,
+          cc: EMAIL_COPY_TO,
+          subject: "ChatGPT readiness report",
+          text: "V priponki posiljam PDF porocilo analize spletne strani. Kopija je bila poslana tudi na peter@seos.si.",
+          attachments: [
+            {
+              filename: "chatgpt-readiness-report.pdf",
+              content: pdfBuffer,
+              contentType: "application/pdf"
+            }
+          ]
+        });
+
+        sendJson(response, 200, {
+          success: true,
+          sentTo: email,
+          copiedTo: EMAIL_COPY_TO
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Posiljanje emaila ni uspelo."
+        });
+        return;
+      }
+      return;
+    }
+
+    await serveStatic(request, response);
+  } catch (error) {
+    const isApiRequest = Boolean(request.url?.startsWith("/api/"));
+    if (isApiRequest) {
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : "Nepričakovana napaka pri API obdelavi."
+      });
+      return;
+    }
+
+    response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Server error");
+  }
+}
+
+export function createAppServer() {
+  return createServer(handleRequest);
 }
 
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
