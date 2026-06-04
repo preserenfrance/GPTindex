@@ -6,6 +6,10 @@
       "dest": "/api/index.js"
     },
     {
+      "src": "/admin",
+      "dest": "/public/admin.html"
+    },
+    {
       "handle": "filesystem"
     },
     {

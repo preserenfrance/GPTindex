@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="sl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SEOS AI Readiness Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <header class="admin-topbar">
+        <a class="brand-mark" href="/" aria-label="Nazaj na GPTIndex">
+          <span class="brand-symbol">S</span>
+          <span>
+            <strong>SEOS Admin</strong>
+            <small>Stripe naročnine in aktivnost</small>
+          </span>
+        </a>
+        <a class="home-link" href="/">Nazaj na orodje</a>
+      </header>
+
+      <main>
+        <section class="hero-card">
+          <div>
+            <p class="eyebrow">Admin cockpit</p>
+            <h1>Nadzor naročnin</h1>
+            <p>
+              Preglej trenutno število naročnin, zadnje Stripe aktivnosti in ročno ustavi obnovitev
+              naročnine, kadar je to potrebno.
+            </p>
+          </div>
+
+          <form id="admin-login" class="token-card">
+            <label for="admin-token">Admin token</label>
+            <div class="token-row">
+              <input id="admin-token" type="password" autocomplete="current-password" placeholder="Vnesi ADMIN_TOKEN" />
+              <button type="submit">Osveži</button>
+            </div>
+            <button id="clear-token" type="button" class="ghost-button">Pozabi token</button>
+          </form>
+        </section>
+
+        <p id="admin-feedback" class="admin-feedback" role="status" aria-live="polite"></p>
+
+        <section id="metrics-grid" class="metrics-grid"></section>
+
+        <section class="admin-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Subscriptions</p>
+              <h2>Naročnine</h2>
+            </div>
+            <button id="refresh-admin" type="button" class="ghost-button">Osveži podatke</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Paket</th>
+                  <th>Stranka</th>
+                  <th>Domena</th>
+                  <th>MRR</th>
+                  <th>Obdobje do</th>
+                  <th>Akcija</th>
+                </tr>
+              </thead>
+              <tbody id="subscriptions-body">
+                <tr>
+                  <td colspan="7">Vnesi admin token in osveži podatke.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="admin-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Checkout activity</p>
+              <h2>Zadnje Stripe aktivnosti</h2>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Čas</th>
+                  <th>Status</th>
+                  <th>Paket</th>
+                  <th>Email</th>
+                  <th>Domena</th>
+                  <th>Znesek</th>
+                </tr>
+              </thead>
+              <tbody id="checkout-body">
+                <tr>
+                  <td colspan="6">Ni podatkov.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/admin.js" type="module"></script>
+  </body>
+</html>

@@ -41,11 +41,27 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_PRICE_SINGLE_DOMAIN_ID=price_...
 STRIPE_PRICE_FIVE_DOMAINS_ID=price_...
 APP_BASE_URL=https://gpt-index.vercel.app
+ADMIN_TOKEN=izberi-dolg-skrivni-token
 ```
 
 Oba Stripe price ID-ja naj bosta nastavljena kot recurring/subscription price.
 
 `STRIPE_PRICE_ID` je še vedno podprt kot stari enkratni produkt za premium crawl, če ga želiš ohraniti.
+
+## Admin
+
+Admin je na voljo na `/admin` oziroma `https://gpt-index.vercel.app/admin`.
+
+Za dostop vnesi isti token, kot je nastavljen v Vercelu pod `ADMIN_TOKEN`. Admin trenutno uporablja Stripe kot vir podatkov in prikazuje:
+
+- število aktivnih, težavnih in ustavljenih naročnin
+- ocenjen mesečni prihodek in kapaciteto domen
+- seznam Stripe naročnin
+- zadnje Stripe Checkout seje
+- ročni preklic obnove naročnine ob koncu plačanega obdobja
+- ponovno aktivacijo obnove, če je bila ustavljena pomotoma
+
+Ročni izklop ne izbriše naročnine takoj, ampak nastavi `cancel_at_period_end=true`, zato uporabnik obdrži že plačano obdobje.
 
 ## Email PDF poročilo
 

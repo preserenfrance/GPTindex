@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const EMAIL_FROM = process.env.EMAIL_FROM || SMTP_USER || "";
 const EMAIL_COPY_TO = "peter@seos.si";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -67,6 +69,42 @@ function sendJson(response, statusCode, payload) {
     "Access-Control-Allow-Origin": "*"
   });
   response.end(JSON.stringify(payload));
+}
+
+function getRequestBearerToken(request) {
+  const authorization = request.headers.authorization || "";
+  if (!authorization.startsWith("Bearer ")) {
+    return "";
+  }
+
+  return authorization.slice("Bearer ".length).trim();
+}
+
+function isAdminRequest(request) {
+  const providedToken = getRequestBearerToken(request);
+  if (!ADMIN_TOKEN || !providedToken) {
+    return false;
+  }
+
+  const expected = Buffer.from(ADMIN_TOKEN);
+  const provided = Buffer.from(providedToken);
+  return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
+
+function requireAdmin(request, response) {
+  if (!ADMIN_TOKEN) {
+    sendJson(response, 503, {
+      error: "Admin ni konfiguriran. Nastavite ADMIN_TOKEN v Vercel environment variables."
+    });
+    return false;
+  }
+
+  if (!isAdminRequest(request)) {
+    sendJson(response, 401, { error: "Manjka ali je napačen admin token." });
+    return false;
+  }
+
+  return true;
 }
 
 async function callStripe(path, options = {}) {
@@ -155,19 +193,28 @@ function getCheckoutPlan(planKey = "crawl_upgrade") {
 
 async function createCheckoutSession(originUrl, planKey = "crawl_upgrade") {
   const plan = getCheckoutPlan(planKey);
+  const checkoutParams = {
+    mode: plan.mode,
+    "line_items[0][price]": plan.priceId,
+    "line_items[0][quantity]": 1,
+    success_url: `${APP_BASE_URL}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${APP_BASE_URL}/?checkout=cancelled`,
+    "metadata[feature]": plan.feature,
+    "metadata[origin_url]": originUrl,
+    "metadata[plan]": plan.key,
+    "metadata[plan_label]": plan.label
+  };
+
+  if (plan.mode === "subscription") {
+    checkoutParams["subscription_data[metadata][feature]"] = plan.feature;
+    checkoutParams["subscription_data[metadata][origin_url]"] = originUrl;
+    checkoutParams["subscription_data[metadata][plan]"] = plan.key;
+    checkoutParams["subscription_data[metadata][plan_label]"] = plan.label;
+  }
+
   const session = await callStripe("/v1/checkout/sessions", {
     method: "POST",
-    body: buildStripeBody({
-      mode: plan.mode,
-      "line_items[0][price]": plan.priceId,
-      "line_items[0][quantity]": 1,
-      success_url: `${APP_BASE_URL}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${APP_BASE_URL}/?checkout=cancelled`,
-      "metadata[feature]": plan.feature,
-      "metadata[origin_url]": originUrl,
-      "metadata[plan]": plan.key,
-      "metadata[plan_label]": plan.label
-    })
+    body: buildStripeBody(checkoutParams)
   });
 
   return { session, plan };
@@ -175,6 +222,214 @@ async function createCheckoutSession(originUrl, planKey = "crawl_upgrade") {
 
 async function getCheckoutSession(sessionId) {
   return callStripe(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+function buildStripeListPath(resourcePath, params = {}) {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        searchParams.append(key, item);
+      }
+    } else if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value));
+    }
+  }
+
+  const query = searchParams.toString();
+  return query ? `${resourcePath}?${query}` : resourcePath;
+}
+
+function getPlanFromPriceId(priceId) {
+  const plan = Object.values(CHECKOUT_PLANS).find((item) => item.priceId && item.priceId === priceId);
+  return plan || null;
+}
+
+function getPlanCapacity(planKey) {
+  if (planKey === "single_domain") {
+    return 1;
+  }
+
+  if (planKey === "five_domains") {
+    return 5;
+  }
+
+  return 0;
+}
+
+function formatMoney(cents, currency = "eur") {
+  if (!Number.isFinite(cents)) {
+    return "";
+  }
+
+  return new Intl.NumberFormat("sl-SI", {
+    style: "currency",
+    currency: String(currency || "eur").toUpperCase()
+  }).format(cents / 100);
+}
+
+function toIsoDate(stripeTimestamp) {
+  return stripeTimestamp ? new Date(stripeTimestamp * 1000).toISOString() : null;
+}
+
+function getCustomerSummary(customer) {
+  if (!customer || typeof customer !== "object") {
+    return {
+      id: typeof customer === "string" ? customer : "",
+      email: "",
+      name: ""
+    };
+  }
+
+  return {
+    id: customer.id || "",
+    email: customer.email || "",
+    name: customer.name || ""
+  };
+}
+
+function getMonthlyAmountCents(subscription) {
+  const items = subscription.items?.data || [];
+  return Math.round(items.reduce((total, item) => {
+    const price = item.price || {};
+    const recurring = price.recurring || {};
+    const quantity = Number(item.quantity || 1);
+    const amount = Number(price.unit_amount || 0) * quantity;
+    const intervalCount = Number(recurring.interval_count || 1);
+
+    if (!amount || !recurring.interval || !intervalCount) {
+      return total;
+    }
+
+    if (recurring.interval === "year") {
+      return total + amount / (12 * intervalCount);
+    }
+
+    if (recurring.interval === "week") {
+      return total + (amount * 52) / (12 * intervalCount);
+    }
+
+    if (recurring.interval === "day") {
+      return total + (amount * 365) / (12 * intervalCount);
+    }
+
+    return total + amount / intervalCount;
+  }, 0));
+}
+
+function summarizeSubscription(subscription) {
+  const firstItem = subscription.items?.data?.[0] || {};
+  const price = firstItem.price || {};
+  const pricePlan = getPlanFromPriceId(price.id);
+  const planKey = subscription.metadata?.plan || pricePlan?.key || "";
+  const planLabel =
+    subscription.metadata?.plan_label ||
+    pricePlan?.label ||
+    price.nickname ||
+    "Stripe naročnina";
+  const customer = getCustomerSummary(subscription.customer);
+  const monthlyAmountCents = getMonthlyAmountCents(subscription);
+
+  return {
+    id: subscription.id,
+    status: subscription.status,
+    planKey,
+    planLabel,
+    originUrl: subscription.metadata?.origin_url || "",
+    customer,
+    priceId: price.id || "",
+    currency: price.currency || "eur",
+    monthlyAmountCents,
+    monthlyAmountDisplay: formatMoney(monthlyAmountCents, price.currency || "eur"),
+    createdAt: toIsoDate(subscription.created),
+    currentPeriodEnd: toIsoDate(subscription.current_period_end),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+    canceledAt: toIsoDate(subscription.canceled_at),
+    domainCapacity: getPlanCapacity(planKey)
+  };
+}
+
+function summarizeCheckoutSession(session) {
+  const customer = getCustomerSummary(session.customer);
+  return {
+    id: session.id,
+    status: session.status,
+    paymentStatus: session.payment_status,
+    planKey: session.metadata?.plan || "",
+    planLabel: session.metadata?.plan_label || "Stripe checkout",
+    originUrl: session.metadata?.origin_url || "",
+    customer,
+    customerEmail: session.customer_details?.email || customer.email || "",
+    amountTotalCents: Number(session.amount_total || 0),
+    amountTotalDisplay: formatMoney(Number(session.amount_total || 0), session.currency || "eur"),
+    currency: session.currency || "eur",
+    createdAt: toIsoDate(session.created)
+  };
+}
+
+async function listStripeSubscriptions() {
+  return callStripe(buildStripeListPath("/v1/subscriptions", {
+    limit: 100,
+    status: "all",
+    "expand[]": ["data.customer"]
+  }));
+}
+
+async function listStripeCheckoutSessions() {
+  return callStripe(buildStripeListPath("/v1/checkout/sessions", {
+    limit: 50,
+    "expand[]": ["data.customer"]
+  }));
+}
+
+function buildAdminMetrics(subscriptions, checkoutSessions) {
+  const activeStatuses = new Set(["active", "trialing"]);
+  const activeSubscriptions = subscriptions.filter((item) => activeStatuses.has(item.status));
+  const problemSubscriptions = subscriptions.filter((item) => ["past_due", "unpaid", "incomplete"].includes(item.status));
+  const cancelingSubscriptions = subscriptions.filter((item) => item.cancelAtPeriodEnd);
+  const completedCheckoutSessions = checkoutSessions.filter((item) => item.status === "complete");
+  const openCheckoutSessions = checkoutSessions.filter((item) => item.status === "open");
+  const mrrCents = activeSubscriptions.reduce((total, item) => total + item.monthlyAmountCents, 0);
+  const domainCapacity = activeSubscriptions.reduce((total, item) => total + item.domainCapacity, 0);
+
+  return {
+    totalSubscriptions: subscriptions.length,
+    activeSubscriptions: activeSubscriptions.length,
+    problemSubscriptions: problemSubscriptions.length,
+    cancelingSubscriptions: cancelingSubscriptions.length,
+    completedCheckoutSessions: completedCheckoutSessions.length,
+    openCheckoutSessions: openCheckoutSessions.length,
+    estimatedDomainCapacity: domainCapacity,
+    estimatedMrrCents: mrrCents,
+    estimatedMrrDisplay: formatMoney(mrrCents, activeSubscriptions[0]?.currency || "eur")
+  };
+}
+
+async function getAdminOverview() {
+  const [subscriptionsPayload, checkoutSessionsPayload] = await Promise.all([
+    listStripeSubscriptions(),
+    listStripeCheckoutSessions()
+  ]);
+
+  const subscriptions = (subscriptionsPayload.data || []).map(summarizeSubscription);
+  const checkoutSessions = (checkoutSessionsPayload.data || []).map(summarizeCheckoutSession);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    source: "stripe",
+    metrics: buildAdminMetrics(subscriptions, checkoutSessions),
+    subscriptions,
+    checkoutSessions
+  };
+}
+
+async function updateSubscriptionRenewal(subscriptionId, cancelAtPeriodEnd) {
+  return callStripe(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: "POST",
+    body: buildStripeBody({
+      cancel_at_period_end: cancelAtPeriodEnd ? "true" : "false"
+    })
+  });
 }
 
 function extractLinks(html, baseUrl) {
@@ -272,7 +527,9 @@ async function serveStatic(request, response) {
     return;
   }
 
-  let filePath = sanitizePath(url.pathname);
+  let filePath = url.pathname === "/admin"
+    ? join(PUBLIC_DIR, "admin.html")
+    : sanitizePath(url.pathname);
 
   if (!extname(filePath)) {
     filePath = join(filePath, "index.html");
@@ -453,6 +710,76 @@ export async function handleRequest(request, response) {
           error: error instanceof Error ? error.message : "Preverjanje Stripe seje ni uspelo."
         });
         return;
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/admin/overview" && request.method === "GET") {
+      if (!requireAdmin(request, response)) {
+        return;
+      }
+
+      try {
+        const overview = await getAdminOverview();
+        sendJson(response, 200, overview);
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Admin pregled ni uspel."
+        });
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/admin/subscriptions/cancel-renewal" && request.method === "POST") {
+      if (!requireAdmin(request, response)) {
+        return;
+      }
+
+      try {
+        const payload = await readJsonBody(request);
+        const subscriptionId = String(payload.subscriptionId || "").trim();
+
+        if (!subscriptionId || !subscriptionId.startsWith("sub_")) {
+          sendJson(response, 400, { error: "Manjka veljaven Stripe subscription ID." });
+          return;
+        }
+
+        const subscription = await updateSubscriptionRenewal(subscriptionId, true);
+        sendJson(response, 200, {
+          success: true,
+          subscription: summarizeSubscription(subscription)
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Preklic obnove naročnine ni uspel."
+        });
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/admin/subscriptions/reactivate" && request.method === "POST") {
+      if (!requireAdmin(request, response)) {
+        return;
+      }
+
+      try {
+        const payload = await readJsonBody(request);
+        const subscriptionId = String(payload.subscriptionId || "").trim();
+
+        if (!subscriptionId || !subscriptionId.startsWith("sub_")) {
+          sendJson(response, 400, { error: "Manjka veljaven Stripe subscription ID." });
+          return;
+        }
+
+        const subscription = await updateSubscriptionRenewal(subscriptionId, false);
+        sendJson(response, 200, {
+          success: true,
+          subscription: summarizeSubscription(subscription)
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Ponovna aktivacija obnove ni uspela."
+        });
       }
       return;
     }
