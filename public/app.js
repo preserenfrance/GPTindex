@@ -1,21 +1,25 @@
 const HISTORY_KEY = "gptindex-analysis-history";
 const HISTORY_LIMIT = 10;
-const STRIPE_UNLOCK_KEY = "gptindex-stripe-upgrade-session";
-const FREE_CRAWL_LIMIT = 5;
+const DEFAULT_PROFILE = "general";
+const DEFAULT_MODE = "analyze";
+
+const PLAN_LABELS = {
+  single_domain: "Single Domain Monitor",
+  five_domains: "Growth Monitor"
+};
 
 const form = document.querySelector("#analyze-form");
 const input = document.querySelector("#url-input");
-const profileSelect = document.querySelector("#profile-select");
-const modeSelect = document.querySelector("#mode-select");
-const crawlLimitSelect = document.querySelector("#crawl-limit-select");
 const submitButton = document.querySelector("#submit-button");
 const emailInput = document.querySelector("#email-input");
 const emailReportButton = document.querySelector("#email-report");
 const emailConsent = document.querySelector("#email-consent");
 const emailFeedback = document.querySelector("#email-feedback");
 const historyList = document.querySelector("#history-list");
-const upgradeButton = document.querySelector("#upgrade-button");
-const upgradeStatus = document.querySelector("#upgrade-status");
+const showPlansButton = document.querySelector("#show-plans");
+const plansPage = document.querySelector("#plans-page");
+const planButtons = document.querySelectorAll(".plan-button");
+const plansFeedback = document.querySelector("#plans-feedback");
 
 const emptyState = document.querySelector("#empty-state");
 const loadingState = document.querySelector("#loading-state");
@@ -33,8 +37,11 @@ const recommendationsList = document.querySelector("#recommendations-list");
 const comparisonBody = document.querySelector("#comparison-body");
 
 let latestResults = [];
-let latestRunMeta = { mode: "analyze", profileLabel: "Splošna stran" };
-let unlockedCheckoutSessionId = localStorage.getItem(STRIPE_UNLOCK_KEY) || "";
+let latestRunMeta = {
+  mode: DEFAULT_MODE,
+  profile: DEFAULT_PROFILE,
+  profileLabel: "Splošna stran"
+};
 
 emailReportButton.disabled = true;
 
@@ -47,6 +54,15 @@ function setEmailFeedback(message = "", tone = "success") {
 
   emailFeedback.textContent = message;
   emailFeedback.className = `email-feedback ${tone}`;
+}
+
+function setPlansFeedback(message = "", tone = "success") {
+  if (!plansFeedback) {
+    return;
+  }
+
+  plansFeedback.textContent = message;
+  plansFeedback.className = `plans-feedback ${tone}`;
 }
 
 function escapeHtml(value) {
@@ -66,26 +82,14 @@ function showState(state) {
 }
 
 function getUrls() {
-  return input.value
-    .split(/\r?\n/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const value = input.value.trim();
+  return value ? [value] : [];
 }
 
-function updateUpgradeStatus(message = "") {
-  if (message) {
-    upgradeStatus.textContent = message;
-    return;
-  }
-
-  const requestedLimit = Number(crawlLimitSelect.value);
-  if (requestedLimit <= FREE_CRAWL_LIMIT) {
-    upgradeStatus.textContent = "Trenutno si v brezplačnem načinu.";
-  } else if (unlockedCheckoutSessionId) {
-    upgradeStatus.textContent = "Premium crawl je odklenjen za to napravo.";
-  } else {
-    upgradeStatus.textContent = "Za več kot 5 strani je potreben Stripe Checkout.";
-  }
+function revealPlans(message = "") {
+  plansPage.classList.remove("hidden");
+  setPlansFeedback(message);
+  plansPage.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderMetrics(technicalSignals) {
@@ -159,19 +163,13 @@ function renderComparison(results) {
     .join("");
 }
 
-function renderPrimaryResult(result, meta = {}) {
+function renderPrimaryResult(result) {
   scoreValue.textContent = String(result.score);
   scoreLabel.textContent = result.verdict.label;
   scoreLabel.className = `score-label ${result.verdict.tone}`;
   resultTitle.textContent = result.summary.title;
   resultDescription.textContent = result.summary.description;
-
-  const additions = [];
-  additions.push(`Profil preverjanja: ${result.profileLabel}`);
-  if (meta.mode === "crawl" && meta.crawledCount) {
-    additions.push(`Crawl je pregledal ${meta.crawledCount} URL-jev`);
-  }
-  resultProfile.textContent = additions.join(" | ");
+  resultProfile.textContent = `Profil preverjanja: ${result.profileLabel}`;
 }
 
 function loadHistory() {
@@ -239,23 +237,14 @@ async function analyzeSingleUrl(url, profile) {
   );
 }
 
-async function crawlDomain(url, profile, limit) {
+async function createCheckoutSession(url, plan) {
   const params = new URLSearchParams({
     url,
-    profile,
-    limit: String(limit)
+    plan
   });
 
-  if (unlockedCheckoutSessionId) {
-    params.set("checkoutSessionId", unlockedCheckoutSessionId);
-  }
-
-  return fetchJson(`/api/crawl?${params.toString()}`, `Crawl ni uspel za ${url}.`);
-}
-
-async function createCheckoutSession(url) {
   return fetchJson(
-    `/api/checkout-session?url=${encodeURIComponent(url)}`,
+    `/api/checkout-session?${params.toString()}`,
     "Stripe checkout ni uspel."
   );
 }
@@ -264,22 +253,18 @@ async function sendEmailReport() {
   const email = emailInput.value.trim();
   if (!email) {
     setEmailFeedback("Vnesite email naslov za pošiljanje PDF poročila.", "error");
-    errorState.textContent = "Vnesite email naslov za pošiljanje PDF poročila.";
-    showState("error");
+    emailInput.focus();
     return;
   }
 
   if (!latestResults.length) {
-    setEmailFeedback("Najprej zaženite analizo ali crawl.", "error");
-    errorState.textContent = "Najprej zaženite analizo ali crawl.";
-    showState("error");
+    setEmailFeedback("Najprej zaženite analizo.", "error");
     return;
   }
 
   if (!emailConsent.checked) {
     setEmailFeedback("Pred pošiljanjem morate potrditi soglasje za uporabo e-maila za obveščanje o novostih.", "error");
-    errorState.textContent = "Potrdite soglasje za uporabo e-maila za obveščanje o novostih.";
-    showState("error");
+    emailConsent.focus();
     return;
   }
 
@@ -302,13 +287,9 @@ async function sendEmailReport() {
     });
 
     showState("result");
-    errorState.textContent = "";
     setEmailFeedback(`PDF poročilo je bilo uspešno poslano na ${response.sentTo}.`, "success");
-    upgradeStatus.textContent = `PDF poročilo je poslano na ${response.sentTo}, kopija pa na ${response.copiedTo}.`;
   } catch (error) {
     setEmailFeedback(error instanceof Error ? error.message : "Pošiljanje emaila ni uspelo.", "error");
-    errorState.textContent = error instanceof Error ? error.message : "Pošiljanje emaila ni uspelo.";
-    showState("error");
   } finally {
     emailReportButton.disabled = false;
     emailReportButton.textContent = "Pošlji PDF";
@@ -316,58 +297,67 @@ async function sendEmailReport() {
 }
 
 async function verifyReturnedCheckout() {
-  const url = new URL(window.location.href);
-  const checkout = url.searchParams.get("checkout");
-  const sessionId = url.searchParams.get("session_id");
+  const currentUrl = new URL(window.location.href);
+  const checkout = currentUrl.searchParams.get("checkout");
+  const sessionId = currentUrl.searchParams.get("session_id");
 
-  if (checkout !== "success" || !sessionId) {
-    if (checkout === "cancelled") {
-      updateUpgradeStatus("Plačilo je bilo preklicano.");
-    }
+  if (!checkout) {
     return;
   }
 
-  const data = await fetchJson(
-    `/api/checkout-session-status?session_id=${encodeURIComponent(sessionId)}`,
-    "Preverjanje Stripe plačila ni uspelo."
-  );
+  plansPage.classList.remove("hidden");
 
-  if (data.isUpgradePaid) {
-    unlockedCheckoutSessionId = sessionId;
-    localStorage.setItem(STRIPE_UNLOCK_KEY, sessionId);
-    updateUpgradeStatus("Plačilo uspešno. Premium crawl je odklenjen.");
-  } else {
-    updateUpgradeStatus("Plačilo ni bilo potrjeno.");
+  if (checkout === "cancelled") {
+    setPlansFeedback("Plačilo je bilo preklicano. Paket lahko izberete znova.", "error");
+  } else if (checkout === "success" && sessionId) {
+    try {
+      const data = await fetchJson(
+        `/api/checkout-session-status?session_id=${encodeURIComponent(sessionId)}`,
+        "Preverjanje Stripe plačila ni uspelo."
+      );
+
+      const planLabel = data.planLabel || PLAN_LABELS[data.plan] || "izbrani paket";
+      if (data.isCheckoutComplete) {
+        setPlansFeedback(`Naročilo za ${planLabel} je potrjeno. Kmalu vas kontaktiramo za nastavitev rednega spremljanja.`, "success");
+      } else {
+        setPlansFeedback("Stripe seja je bila ustvarjena, vendar plačilo še ni potrjeno.", "error");
+      }
+    } catch (error) {
+      setPlansFeedback(error instanceof Error ? error.message : "Preverjanje Stripe plačila ni uspelo.", "error");
+    }
   }
 
-  url.searchParams.delete("checkout");
-  url.searchParams.delete("session_id");
-  window.history.replaceState({}, "", url);
+  currentUrl.searchParams.delete("checkout");
+  currentUrl.searchParams.delete("session_id");
+  window.history.replaceState({}, "", currentUrl);
+  plansPage.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function setBusyState(isBusy) {
   submitButton.disabled = isBusy;
-  upgradeButton.disabled = isBusy;
   emailReportButton.disabled = isBusy || !latestResults.length;
+  planButtons.forEach((button) => {
+    button.disabled = isBusy;
+  });
   submitButton.textContent = isBusy ? "Analiziram ..." : "Analiziraj";
 }
 
-function persistCurrentRun(mode, profile, inputs, results) {
+function persistCurrentRun(inputs, results) {
   const first = results[0];
   if (!first) {
     return;
   }
 
   latestRunMeta = {
-    mode,
-    profileLabel: first.profileLabel,
-    profile
+    mode: DEFAULT_MODE,
+    profile: DEFAULT_PROFILE,
+    profileLabel: first.profileLabel
   };
 
   saveHistory({
-    mode,
-    modeLabel: mode === "crawl" ? "Samodejni crawl" : "Ročna analiza",
-    profile,
+    mode: DEFAULT_MODE,
+    modeLabel: "Analiza URL-ja",
+    profile: DEFAULT_PROFILE,
     profileLabel: first.profileLabel,
     inputs,
     inputPreview: inputs.join(", ").slice(0, 120),
@@ -377,22 +367,23 @@ function persistCurrentRun(mode, profile, inputs, results) {
   });
 }
 
-async function handleUpgrade() {
-  const urls = getUrls();
-  const seedUrl = urls[0];
+async function handlePlanCheckout(plan) {
+  const seedUrl = getUrls()[0] || latestResults[0]?.url || "";
 
   if (!seedUrl) {
-    updateUpgradeStatus("Najprej vnesi začetni URL za crawl.");
+    plansPage.classList.remove("hidden");
+    setPlansFeedback("Najprej vnesite URL naslov, da paket povežemo s pravo domeno.", "error");
+    input.focus();
     return;
   }
 
   try {
     setBusyState(true);
-    updateUpgradeStatus("Preusmerjam na Stripe Checkout ...");
-    const checkout = await createCheckoutSession(seedUrl);
+    setPlansFeedback(`Preusmerjam na Stripe Checkout za ${PLAN_LABELS[plan] || "izbrani paket"} ...`);
+    const checkout = await createCheckoutSession(seedUrl, plan);
     window.location.href = checkout.checkoutUrl;
   } catch (error) {
-    updateUpgradeStatus(error instanceof Error ? error.message : "Stripe checkout ni uspel.");
+    setPlansFeedback(error instanceof Error ? error.message : "Stripe checkout ni uspel.", "error");
     setBusyState(false);
   }
 }
@@ -401,48 +392,34 @@ async function handleSubmit(event) {
   event.preventDefault();
 
   const urls = getUrls();
-  const profile = profileSelect.value;
-  const mode = modeSelect.value;
-  const crawlLimit = Number(crawlLimitSelect.value);
   if (!urls.length) {
     return;
   }
 
+  latestResults = [];
   setBusyState(true);
+  setEmailFeedback("");
+  setPlansFeedback("");
+  errorState.textContent = "";
   showState("loading");
 
   try {
-    let results = [];
-    let crawlMeta = null;
-
-    if (mode === "crawl") {
-      const crawlResult = await crawlDomain(urls[0], profile, crawlLimit);
-      results = crawlResult.results;
-      crawlMeta = { mode: "crawl", crawledCount: crawlResult.crawledCount };
-    } else {
-      results = await Promise.all(urls.map((url) => analyzeSingleUrl(url, profile)));
-    }
-
+    const results = await Promise.all(urls.map((url) => analyzeSingleUrl(url, DEFAULT_PROFILE)));
     results.sort((a, b) => b.score - a.score);
     latestResults = results;
 
     renderComparison(results);
-    renderPrimaryResult(results[0], crawlMeta || { mode: "analyze" });
+    renderPrimaryResult(results[0]);
     renderMetrics(results[0].technicalSignals);
     renderChecks(results[0].checks);
     renderRecommendations(results[0].recommendations);
-    persistCurrentRun(mode, profile, mode === "crawl" ? [urls[0]] : urls, results);
+    persistCurrentRun(urls, results);
 
     emailReportButton.disabled = false;
-    updateUpgradeStatus();
-    setEmailFeedback("");
     showState("result");
   } catch (error) {
     latestResults = [];
     emailReportButton.disabled = true;
-    if (error instanceof Error && (error.requiresUpgrade || error.freeLimit)) {
-      updateUpgradeStatus("Za izbran obseg crawla najprej opravi Stripe Checkout.");
-    }
     errorState.textContent = error instanceof Error ? error.message : "Prišlo je do napake pri analizi.";
     showState("error");
   } finally {
@@ -466,17 +443,21 @@ historyList.addEventListener("click", (event) => {
     return;
   }
 
-  input.value = item.inputs.join("\n");
-  profileSelect.value = item.profile;
-  modeSelect.value = item.mode;
+  input.value = item.inputs[0] || "";
 });
 
-modeSelect.addEventListener("change", updateUpgradeStatus);
-crawlLimitSelect.addEventListener("change", updateUpgradeStatus);
+showPlansButton.addEventListener("click", () => {
+  revealPlans();
+});
+
+planButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    handlePlanCheckout(button.dataset.plan || "single_domain");
+  });
+});
+
 form.addEventListener("submit", handleSubmit);
-upgradeButton.addEventListener("click", handleUpgrade);
 emailReportButton.addEventListener("click", sendEmailReport);
 
 renderHistory();
-updateUpgradeStatus();
 await verifyReturnedCheckout();

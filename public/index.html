@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SEOS AI Readiness</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -16,11 +19,6 @@
             <small>GPTIndex audit</small>
           </span>
         </a>
-        <div class="topbar-status">
-          <span>Live audit</span>
-          <span>PDF report</span>
-          <span>No data stored</span>
-        </div>
       </header>
 
       <header class="workspace-header">
@@ -30,8 +28,8 @@
         </div>
         <div class="hero-stats">
           <article class="hero-stat">
-            <span class="hero-stat-value">5</span>
-            <span class="hero-stat-label">free crawl</span>
+            <span class="hero-stat-value">1 URL</span>
+            <span class="hero-stat-label">hitra analiza</span>
           </article>
           <article class="hero-stat is-accent">
             <span class="hero-stat-value">12+</span>
@@ -49,54 +47,25 @@
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Audit setup</p>
-              <h2>Konfiguracija</h2>
+              <h2>Vnesi URL</h2>
             </div>
             <span class="panel-badge">SEOS</span>
           </div>
 
           <form id="analyze-form" class="analyze-form">
-            <label for="url-input">Naslovi spletnih strani</label>
-            <textarea
+            <label for="url-input">URL naslov</label>
+            <input
               id="url-input"
+              class="url-field"
               name="url"
-              rows="7"
-              placeholder="https://example.com&#10;https://example.com/blog/objava&#10;moja-domena.si"
+              type="text"
+              inputmode="url"
+              placeholder="seos.si ali https://seos.si"
               required
-            ></textarea>
+            />
 
             <div class="input-grid">
-              <div>
-                <label for="profile-select">Tip strani</label>
-                <select id="profile-select" name="profile">
-                  <option value="general">Splošna stran</option>
-                  <option value="blog">Blog / članek</option>
-                  <option value="shop">Trgovina / produkt</option>
-                  <option value="landing">Landing page</option>
-                </select>
-              </div>
-              <div>
-                <label for="mode-select">Način</label>
-                <select id="mode-select" name="mode">
-                  <option value="analyze">Analiza vnesenih URL-jev</option>
-                  <option value="crawl">Samodejni crawl ene domene</option>
-                </select>
-              </div>
-              <div>
-                <label for="crawl-limit-select">Število crawl strani</label>
-                <select id="crawl-limit-select" name="crawlLimit">
-                  <option value="5">5 strani brezplačno</option>
-                  <option value="10">10 strani Premium</option>
-                  <option value="25">25 strani Premium</option>
-                </select>
-              </div>
               <button type="submit" id="submit-button">Analiziraj</button>
-            </div>
-
-            <div id="upgrade-card" class="upgrade-card">
-              <p class="upgrade-title">Premium crawl</p>
-              <p class="upgrade-copy">Brezplačno dobiš 5 strani. Za večji obseg odkleni dodatne URL-je.</p>
-              <button type="button" id="upgrade-button" class="secondary-button">Odkleni več strani</button>
-              <p id="upgrade-status" class="upgrade-status"></p>
             </div>
           </form>
 
@@ -132,7 +101,25 @@
 
         <section class="panel results-panel">
           <div id="empty-state" class="empty-state">
-            <div class="empty-illustration"></div>
+            <div class="audit-preview" aria-hidden="true">
+              <div class="audit-preview-top">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="audit-preview-body">
+                <div class="audit-score-ring">
+                  <strong>86</strong>
+                  <small>AI score</small>
+                </div>
+                <div class="audit-preview-list">
+                  <span class="is-good"></span>
+                  <span class="is-good"></span>
+                  <span class="is-warn"></span>
+                  <span class="is-good"></span>
+                </div>
+              </div>
+            </div>
             <h2>Pripravljeno za audit</h2>
             <p>Rezultati, kriteriji in priporočila se prikažejo po analizi.</p>
           </div>
@@ -161,9 +148,21 @@
             </section>
             <div id="email-feedback" class="email-feedback hidden" role="status" aria-live="polite"></div>
 
+            <section class="subscription-cta">
+              <div>
+                <p class="card-label">Stalni nadzor strani</p>
+                <h3>Želiš pregledati več URL-jev ali dobiti opozorilo, ko pride do težav?</h3>
+                <p>
+                  Naroči redno crawlanje domene, spremljanje AI readiness signalov in opozorila ob
+                  pomembnih spremembah.
+                </p>
+              </div>
+              <button id="show-plans" type="button" class="primary-wide-button">Izberi paket</button>
+            </section>
+
             <section class="comparison-section">
               <div class="section-heading">
-                <h3>Primerjava URL-jev</h3>
+                <h3>Pregled URL-ja</h3>
               </div>
               <div class="comparison-table-wrap">
                 <table class="comparison-table">
@@ -217,6 +216,51 @@
           </div>
         </section>
       </main>
+
+      <section id="plans-page" class="plans-page hidden">
+        <div class="plans-header">
+          <p class="eyebrow">Subscription plans</p>
+          <h2>Izberi paket za redno spremljanje</h2>
+        </div>
+        <div class="plans-grid">
+          <article class="plan-card">
+            <div>
+              <p class="plan-kicker">Za eno spletno stran</p>
+              <h3>Single Domain Monitor</h3>
+              <p class="plan-copy">
+                Redno crawlanje ene domene, PDF poročila in opozorila, ko se poslabšajo ključni
+                AI readiness signali.
+              </p>
+            </div>
+            <ul>
+              <li>1 domena</li>
+              <li>Redni crawl ključnih podstrani</li>
+              <li>Email opozorila ob težavah</li>
+              <li>Mesečni PDF povzetek</li>
+            </ul>
+            <button type="button" class="plan-button" data-plan="single_domain">Naroči 1 domeno</button>
+          </article>
+
+          <article class="plan-card featured">
+            <div>
+              <p class="plan-kicker">Za več spletnih mest</p>
+              <h3>Growth Monitor</h3>
+              <p class="plan-copy">
+                Spremljanje do petih domen z rednim crawlanjem, prioritetnimi opozorili in pregledom
+                sprememb po domenah.
+              </p>
+            </div>
+            <ul>
+              <li>Do 5 domen</li>
+              <li>Redno crawlanje več URL-jev</li>
+              <li>Prioritetna email opozorila</li>
+              <li>Primerjava domen in trendi</li>
+            </ul>
+            <button type="button" class="plan-button" data-plan="five_domains">Naroči 5 domen</button>
+          </article>
+        </div>
+        <p id="plans-feedback" class="plans-feedback"></p>
+      </section>
 
       <footer class="site-footer">
         <p>

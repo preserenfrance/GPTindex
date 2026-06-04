@@ -13,6 +13,8 @@ const MAX_UNLOCKED_CRAWL_LIMIT = 25;
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || "";
+const STRIPE_PRICE_SINGLE_DOMAIN_ID = process.env.STRIPE_PRICE_SINGLE_DOMAIN_ID || "";
+const STRIPE_PRICE_FIVE_DOMAINS_ID = process.env.STRIPE_PRICE_FIVE_DOMAINS_ID || "";
 const SMTP_HOST = process.env.SMTP_HOST || "";
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = process.env.SMTP_SECURE === "true";
@@ -30,6 +32,33 @@ const MIME_TYPES = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".ico": "image/x-icon"
+};
+
+const CHECKOUT_PLANS = {
+  crawl_upgrade: {
+    envName: "STRIPE_PRICE_ID",
+    feature: "crawl_upgrade",
+    key: "crawl_upgrade",
+    label: "Premium crawl",
+    mode: "payment",
+    priceId: STRIPE_PRICE_ID
+  },
+  single_domain: {
+    envName: "STRIPE_PRICE_SINGLE_DOMAIN_ID",
+    feature: "domain_monitoring",
+    key: "single_domain",
+    label: "Single Domain Monitor",
+    mode: "subscription",
+    priceId: STRIPE_PRICE_SINGLE_DOMAIN_ID
+  },
+  five_domains: {
+    envName: "STRIPE_PRICE_FIVE_DOMAINS_ID",
+    feature: "domain_monitoring",
+    key: "five_domains",
+    label: "Growth Monitor",
+    mode: "subscription",
+    priceId: STRIPE_PRICE_FIVE_DOMAINS_ID
+  }
 };
 
 function sendJson(response, statusCode, payload) {
@@ -111,23 +140,37 @@ function buildStripeBody(params) {
   return body.toString();
 }
 
-async function createCheckoutSession(originUrl) {
-  if (!STRIPE_PRICE_ID) {
-    throw new Error("Stripe ni konfiguriran. Nastavite STRIPE_PRICE_ID.");
+function getCheckoutPlan(planKey = "crawl_upgrade") {
+  const plan = CHECKOUT_PLANS[planKey];
+  if (!plan) {
+    throw new Error("Izbrani paket ne obstaja.");
   }
 
-  return callStripe("/v1/checkout/sessions", {
+  if (!plan.priceId) {
+    throw new Error(`Stripe ni konfiguriran za ${plan.label}. Nastavite ${plan.envName}.`);
+  }
+
+  return plan;
+}
+
+async function createCheckoutSession(originUrl, planKey = "crawl_upgrade") {
+  const plan = getCheckoutPlan(planKey);
+  const session = await callStripe("/v1/checkout/sessions", {
     method: "POST",
     body: buildStripeBody({
-      mode: "payment",
-      "line_items[0][price]": STRIPE_PRICE_ID,
+      mode: plan.mode,
+      "line_items[0][price]": plan.priceId,
       "line_items[0][quantity]": 1,
       success_url: `${APP_BASE_URL}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP_BASE_URL}/?checkout=cancelled`,
-      "metadata[feature]": "crawl_upgrade",
-      "metadata[origin_url]": originUrl
+      "metadata[feature]": plan.feature,
+      "metadata[origin_url]": originUrl,
+      "metadata[plan]": plan.key,
+      "metadata[plan_label]": plan.label
     })
   });
+
+  return { session, plan };
 }
 
 async function getCheckoutSession(sessionId) {
@@ -359,6 +402,7 @@ export async function handleRequest(request, response) {
 
     if (url.pathname === "/api/checkout-session" && request.method === "GET") {
       const target = url.searchParams.get("url");
+      const plan = url.searchParams.get("plan") || "crawl_upgrade";
 
       if (!target) {
         sendJson(response, 400, { error: "Za checkout je potreben začetni URL." });
@@ -366,10 +410,12 @@ export async function handleRequest(request, response) {
       }
 
       try {
-        const session = await createCheckoutSession(target);
+        const { session, plan: checkoutPlan } = await createCheckoutSession(target, plan);
         sendJson(response, 200, {
           checkoutUrl: session.url,
-          sessionId: session.id
+          sessionId: session.id,
+          plan: checkoutPlan.key,
+          planLabel: checkoutPlan.label
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -393,6 +439,12 @@ export async function handleRequest(request, response) {
         sendJson(response, 200, {
           sessionId: session.id,
           paymentStatus: session.payment_status,
+          status: session.status,
+          feature: session.metadata?.feature || "",
+          plan: session.metadata?.plan || "",
+          planLabel: session.metadata?.plan_label || "",
+          isCheckoutComplete:
+            session.status === "complete" || session.payment_status === "paid",
           isUpgradePaid:
             session.payment_status === "paid" && session.metadata?.feature === "crawl_upgrade"
         });

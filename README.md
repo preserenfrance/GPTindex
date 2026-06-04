@@ -1,6 +1,6 @@
 # GPTIndex Readiness Checker
 
-Majhna aplikacija za preverjanje, ali je spletna stran dovolj dobro pripravljena za pregledovanje in povzemanje v orodjih, kot je ChatGPT.
+Majhna SaaS aplikacija za preverjanje, ali je spletna stran pripravljena za pregledovanje in povzemanje v orodjih, kot je ChatGPT.
 
 ## Zagon
 
@@ -24,44 +24,40 @@ npm test
 - `title`, `meta description`, `canonical` in `lang`
 - strukturirane podatke (`application/ld+json`)
 - količino besedila ter osnovno semantično strukturo
-- profile za `blog`, `shop` in `landing` strani
-- primerjavo več URL-jev hkrati
-- izvoz primerjave v CSV in tiskanje pogleda v PDF
+- ključne AI readiness kriterije in priporočila
+- PDF poročilo, poslano na email
 
-## Premium crawl s Stripe
+## Stripe naročnine
 
-Brezplačni crawl pregleda do `5` strani. Za `10` ali `25` strani aplikacija ustvari Stripe Checkout sejo.
+Po osnovni analizi lahko uporabnik izbere paket za redno spremljanje:
 
-Pred zagonom nastavi:
+- `Single Domain Monitor`: spremljanje 1 domene
+- `Growth Monitor`: spremljanje do 5 domen
+
+Na Vercelu nastavi:
 
 ```bash
-set STRIPE_SECRET_KEY=sk_test_...
-set STRIPE_PRICE_ID=price_...
-set APP_BASE_URL=http://localhost:3000
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_PRICE_SINGLE_DOMAIN_ID=price_...
+STRIPE_PRICE_FIVE_DOMAINS_ID=price_...
+APP_BASE_URL=https://gpt-index.vercel.app
 ```
 
-Na `Windows PowerShell` lahko uporabiš:
+Oba Stripe price ID-ja naj bosta nastavljena kot recurring/subscription price.
 
-```powershell
-$env:STRIPE_SECRET_KEY="sk_test_..."
-$env:STRIPE_PRICE_ID="price_..."
-$env:APP_BASE_URL="http://localhost:3000"
-npm start
-```
+`STRIPE_PRICE_ID` je še vedno podprt kot stari enkratni produkt za premium crawl, če ga želiš ohraniti.
 
-`STRIPE_PRICE_ID` mora kazati na enkratni Stripe produkt za odklep dodatnih crawl strani.
+## Email PDF poročilo
 
-## Email PDF porocilo
+PDF poročilo se pošlje na email uporabnika, kopija pa na `peter@seos.si`.
 
-Lokalni izvoz CSV/PDF je zamenjan s posiljanjem PDF porocila na email uporabnika. Kopija se vedno poslje tudi na `peter@seos.si`.
+Na Vercelu nastavi:
 
-Nastavi se:
-
-```powershell
-$env:SMTP_HOST="smtp.example.com"
-$env:SMTP_PORT="587"
-$env:SMTP_USER="no-reply@example.com"
-$env:SMTP_PASS="secret"
-$env:SMTP_SECURE="false"
-$env:EMAIL_FROM="no-reply@example.com"
+```bash
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=no-reply@example.com
+SMTP_PASS=secret
+SMTP_SECURE=false
+EMAIL_FROM=no-reply@example.com
 ```
