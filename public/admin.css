@@ -32,12 +32,14 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 a:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(77, 133, 240, 0.24);
@@ -163,12 +165,15 @@ a:focus-visible {
   gap: 8px;
 }
 
-.token-row input {
+.token-row input,
+.price-form input,
+.price-form select {
   min-height: 44px;
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   padding: 0 12px;
+  background: #fff;
 }
 
 .token-row button,
@@ -252,6 +257,81 @@ button:disabled {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.price-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.price-card {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid rgba(33, 74, 166, 0.14);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.96)),
+    #fff;
+}
+
+.price-card h3,
+.price-card p {
+  margin: 0;
+}
+
+.price-value {
+  margin-top: 10px !important;
+  color: var(--blue);
+  font-size: 1.8rem;
+  font-weight: 900;
+}
+
+.price-warning {
+  margin-top: 10px !important;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+.price-form {
+  display: grid;
+  gap: 10px;
+}
+
+.price-form label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.price-form input,
+.price-form select {
+  margin-top: 6px;
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ink) !important;
+  line-height: 1.35;
+}
+
+.check-row input {
+  width: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+  accent-color: var(--blue);
+}
+
+.panel-copy {
+  max-width: 780px;
+  margin: -4px 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .metric-card {
@@ -372,7 +452,9 @@ tbody tr:last-child td {
 
 @media (max-width: 1100px) {
   .hero-card,
-  .metrics-grid {
+  .metrics-grid,
+  .price-grid,
+  .price-card {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -387,6 +469,8 @@ tbody tr:last-child td {
   .hero-card,
   .token-row,
   .metrics-grid,
+  .price-grid,
+  .price-card,
   .panel-heading {
     grid-template-columns: 1fr;
   }

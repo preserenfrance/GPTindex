@@ -40,11 +40,15 @@ Na Vercelu nastavi:
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_PRICE_SINGLE_DOMAIN_ID=price_...
 STRIPE_PRICE_FIVE_DOMAINS_ID=price_...
+STRIPE_PRODUCT_SINGLE_DOMAIN_ID=prod_...
+STRIPE_PRODUCT_FIVE_DOMAINS_ID=prod_...
 APP_BASE_URL=https://gpt-index.vercel.app
 ADMIN_TOKEN=izberi-dolg-skrivni-token
 ```
 
 Oba Stripe price ID-ja naj bosta nastavljena kot recurring/subscription price.
+
+`STRIPE_PRODUCT_SINGLE_DOMAIN_ID` in `STRIPE_PRODUCT_FIVE_DOMAINS_ID` sta priporočena za admin urejanje cen. Če nista nastavljena, aplikacija poskusi produkt poiskati iz obstoječega `STRIPE_PRICE_*` ID-ja.
 
 `STRIPE_PRICE_ID` je še vedno podprt kot stari enkratni produkt za premium crawl, če ga želiš ohraniti.
 
@@ -60,8 +64,11 @@ Za dostop vnesi isti token, kot je nastavljen v Vercelu pod `ADMIN_TOKEN`. Admin
 - zadnje Stripe Checkout seje
 - ročni preklic obnove naročnine ob koncu plačanega obdobja
 - ponovno aktivacijo obnove, če je bila ustavljena pomotoma
+- urejanje cen paketov za nove checkoute
 
 Ročni izklop ne izbriše naročnine takoj, ampak nastavi `cancel_at_period_end=true`, zato uporabnik obdrži že plačano obdobje.
+
+Stripe ne omogoča spreminjanja zneska obstoječega `Price` objekta. Admin zato ustvari nov Stripe price za isti produkt, stare aktivne cene pa lahko arhivira. Obstoječe naročnine ostanejo na stari ceni, novi checkouti pa uporabijo najnovejšo aktivno ceno.
 
 ## Email PDF poročilo
 

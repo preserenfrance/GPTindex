@@ -16,6 +16,8 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || "";
 const STRIPE_PRICE_SINGLE_DOMAIN_ID = process.env.STRIPE_PRICE_SINGLE_DOMAIN_ID || "";
 const STRIPE_PRICE_FIVE_DOMAINS_ID = process.env.STRIPE_PRICE_FIVE_DOMAINS_ID || "";
+const STRIPE_PRODUCT_SINGLE_DOMAIN_ID = process.env.STRIPE_PRODUCT_SINGLE_DOMAIN_ID || "";
+const STRIPE_PRODUCT_FIVE_DOMAINS_ID = process.env.STRIPE_PRODUCT_FIVE_DOMAINS_ID || "";
 const SMTP_HOST = process.env.SMTP_HOST || "";
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = process.env.SMTP_SECURE === "true";
@@ -38,28 +40,34 @@ const MIME_TYPES = {
 
 const CHECKOUT_PLANS = {
   crawl_upgrade: {
-    envName: "STRIPE_PRICE_ID",
     feature: "crawl_upgrade",
     key: "crawl_upgrade",
     label: "Premium crawl",
     mode: "payment",
-    priceId: STRIPE_PRICE_ID
+    priceEnvName: "STRIPE_PRICE_ID",
+    priceId: STRIPE_PRICE_ID,
+    productEnvName: "",
+    productId: ""
   },
   single_domain: {
-    envName: "STRIPE_PRICE_SINGLE_DOMAIN_ID",
     feature: "domain_monitoring",
     key: "single_domain",
     label: "Single Domain Monitor",
     mode: "subscription",
-    priceId: STRIPE_PRICE_SINGLE_DOMAIN_ID
+    priceEnvName: "STRIPE_PRICE_SINGLE_DOMAIN_ID",
+    priceId: STRIPE_PRICE_SINGLE_DOMAIN_ID,
+    productEnvName: "STRIPE_PRODUCT_SINGLE_DOMAIN_ID",
+    productId: STRIPE_PRODUCT_SINGLE_DOMAIN_ID
   },
   five_domains: {
-    envName: "STRIPE_PRICE_FIVE_DOMAINS_ID",
     feature: "domain_monitoring",
     key: "five_domains",
     label: "Growth Monitor",
     mode: "subscription",
-    priceId: STRIPE_PRICE_FIVE_DOMAINS_ID
+    priceEnvName: "STRIPE_PRICE_FIVE_DOMAINS_ID",
+    priceId: STRIPE_PRICE_FIVE_DOMAINS_ID,
+    productEnvName: "STRIPE_PRODUCT_FIVE_DOMAINS_ID",
+    productId: STRIPE_PRODUCT_FIVE_DOMAINS_ID
   }
 };
 
@@ -184,15 +192,38 @@ function getCheckoutPlan(planKey = "crawl_upgrade") {
     throw new Error("Izbrani paket ne obstaja.");
   }
 
+  if (!plan.priceId && !plan.productId) {
+    const envNames = [plan.priceEnvName, plan.productEnvName].filter(Boolean).join(" ali ");
+    throw new Error(`Stripe ni konfiguriran za ${plan.label}. Nastavite ${envNames}.`);
+  }
+
+  return plan;
+}
+
+async function resolveCheckoutPlan(planKey = "crawl_upgrade") {
+  const plan = getCheckoutPlan(planKey);
+  const productId = plan.mode === "subscription" ? await resolvePlanProductId(plan) : plan.productId;
+
+  if (plan.mode === "subscription" && productId) {
+    const latestPrice = await getLatestActiveRecurringPrice(productId);
+    if (latestPrice?.id) {
+      return {
+        ...plan,
+        productId,
+        priceId: latestPrice.id
+      };
+    }
+  }
+
   if (!plan.priceId) {
-    throw new Error(`Stripe ni konfiguriran za ${plan.label}. Nastavite ${plan.envName}.`);
+    throw new Error(`Za ${plan.label} ni aktivne Stripe cene.`);
   }
 
   return plan;
 }
 
 async function createCheckoutSession(originUrl, planKey = "crawl_upgrade") {
-  const plan = getCheckoutPlan(planKey);
+  const plan = await resolveCheckoutPlan(planKey);
   const checkoutParams = {
     mode: plan.mode,
     "line_items[0][price]": plan.priceId,
@@ -238,6 +269,203 @@ function buildStripeListPath(resourcePath, params = {}) {
 
   const query = searchParams.toString();
   return query ? `${resourcePath}?${query}` : resourcePath;
+}
+
+async function listActiveRecurringPricesForProduct(productId) {
+  if (!productId) {
+    return [];
+  }
+
+  const payload = await callStripe(buildStripeListPath("/v1/prices", {
+    active: "true",
+    limit: 100,
+    product: productId,
+    type: "recurring"
+  }));
+
+  return payload.data || [];
+}
+
+function sortPricesNewestFirst(prices) {
+  return [...prices].sort((a, b) => Number(b.created || 0) - Number(a.created || 0));
+}
+
+async function getLatestActiveRecurringPrice(productId) {
+  const prices = await listActiveRecurringPricesForProduct(productId);
+  return sortPricesNewestFirst(prices)[0] || null;
+}
+
+async function getStripePrice(priceId) {
+  if (!priceId) {
+    return null;
+  }
+
+  return callStripe(buildStripeListPath(`/v1/prices/${encodeURIComponent(priceId)}`, {
+    "expand[]": ["product"]
+  }));
+}
+
+async function resolvePlanProductId(plan) {
+  if (plan.productId) {
+    return plan.productId;
+  }
+
+  if (!plan.priceId) {
+    return "";
+  }
+
+  const price = await getStripePrice(plan.priceId);
+  return typeof price?.product === "object" ? price.product.id || "" : price?.product || "";
+}
+
+function summarizePrice(price, plan, isCheckoutDefault = false, source = "stripe") {
+  if (!price) {
+    return {
+      planKey: plan.key,
+      planLabel: plan.label,
+      productId: plan.productId || "",
+      priceId: "",
+      amountCents: 0,
+      amountDisplay: "",
+      currency: "eur",
+      interval: "month",
+      active: false,
+      isCheckoutDefault: false,
+      source,
+      message: plan.productId
+        ? "Ni aktivne cene za ta Stripe produkt."
+        : `Nastavite ${plan.productEnvName || plan.priceEnvName}.`
+    };
+  }
+
+  return {
+    planKey: plan.key,
+    planLabel: plan.label,
+    productId: typeof price.product === "object" ? price.product.id : price.product || plan.productId || "",
+    productName: typeof price.product === "object" ? price.product.name || "" : "",
+    priceId: price.id,
+    amountCents: Number(price.unit_amount || 0),
+    amountDisplay: formatMoney(Number(price.unit_amount || 0), price.currency || "eur"),
+    currency: price.currency || "eur",
+    interval: price.recurring?.interval || "month",
+    intervalCount: Number(price.recurring?.interval_count || 1),
+    active: Boolean(price.active),
+    createdAt: toIsoDate(price.created),
+    isCheckoutDefault,
+    source,
+    message: ""
+  };
+}
+
+async function getPlanPriceSummary(plan) {
+  if (plan.mode !== "subscription") {
+    return null;
+  }
+
+  const productId = await resolvePlanProductId(plan);
+
+  if (productId) {
+    const prices = sortPricesNewestFirst(await listActiveRecurringPricesForProduct(productId));
+    const latestPrice = prices[0] || null;
+    return summarizePrice(latestPrice, { ...plan, productId }, Boolean(latestPrice), "product");
+  }
+
+  if (plan.priceId) {
+    const price = await getStripePrice(plan.priceId);
+    return summarizePrice(price, plan, true, "env_price");
+  }
+
+  return summarizePrice(null, plan, false, "missing");
+}
+
+async function getPlanPriceSummaries() {
+  const plans = Object.values(CHECKOUT_PLANS).filter((plan) => plan.mode === "subscription");
+  const summaries = [];
+
+  for (const plan of plans) {
+    try {
+      summaries.push(await getPlanPriceSummary(plan));
+    } catch (error) {
+      summaries.push({
+        planKey: plan.key,
+        planLabel: plan.label,
+        productId: plan.productId || "",
+        priceId: "",
+        amountCents: 0,
+        amountDisplay: "",
+        currency: "eur",
+        interval: "month",
+        active: false,
+        isCheckoutDefault: false,
+        source: "error",
+        message: error instanceof Error ? error.message : "Cene ni bilo mogoče prebrati."
+      });
+    }
+  }
+
+  return summaries.filter(Boolean);
+}
+
+async function archiveOldPlanPrices(productId, keepPriceId) {
+  if (!productId) {
+    return 0;
+  }
+
+  const prices = await listActiveRecurringPricesForProduct(productId);
+  const oldPrices = prices.filter((price) => price.id !== keepPriceId);
+
+  await Promise.all(oldPrices.map((price) =>
+    callStripe(`/v1/prices/${encodeURIComponent(price.id)}`, {
+      method: "POST",
+      body: buildStripeBody({ active: "false" })
+    })
+  ));
+
+  return oldPrices.length;
+}
+
+async function createPlanPrice({ planKey, amountCents, currency = "eur", interval = "month", archiveOldPrices = true }) {
+  const plan = getCheckoutPlan(planKey);
+  if (plan.mode !== "subscription") {
+    throw new Error("Cene lahko urejate samo za naročniške pakete.");
+  }
+
+  const productId = await resolvePlanProductId(plan);
+
+  if (!productId) {
+    throw new Error(`Za urejanje cen nastavite ${plan.productEnvName} ali ${plan.priceEnvName}.`);
+  }
+
+  const normalizedAmount = Number(amountCents);
+  if (!Number.isInteger(normalizedAmount) || normalizedAmount < 50) {
+    throw new Error("Cena mora biti najmanj 0,50 v izbrani valuti.");
+  }
+
+  if (!["day", "week", "month", "year"].includes(interval)) {
+    throw new Error("Interval mora biti day, week, month ali year.");
+  }
+
+  const price = await callStripe("/v1/prices", {
+    method: "POST",
+    body: buildStripeBody({
+      currency: String(currency || "eur").toLowerCase(),
+      unit_amount: normalizedAmount,
+      product: productId,
+      "recurring[interval]": interval,
+      nickname: `${plan.label} ${formatMoney(normalizedAmount, currency || "eur")} / ${interval}`,
+      "metadata[plan]": plan.key,
+      "metadata[plan_label]": plan.label,
+      "metadata[managed_by]": "gptindex_admin"
+    })
+  });
+
+  const planWithProduct = { ...plan, productId };
+  const archivedCount = archiveOldPrices ? await archiveOldPlanPrices(productId, price.id) : 0;
+
+  return {
+    price: summarizePrice(price, planWithProduct, true, "product"),
+    archivedCount
+  };
 }
 
 function getPlanFromPriceId(priceId) {
@@ -406,9 +634,10 @@ function buildAdminMetrics(subscriptions, checkoutSessions) {
 }
 
 async function getAdminOverview() {
-  const [subscriptionsPayload, checkoutSessionsPayload] = await Promise.all([
+  const [subscriptionsPayload, checkoutSessionsPayload, prices] = await Promise.all([
     listStripeSubscriptions(),
-    listStripeCheckoutSessions()
+    listStripeCheckoutSessions(),
+    getPlanPriceSummaries()
   ]);
 
   const subscriptions = (subscriptionsPayload.data || []).map(summarizeSubscription);
@@ -418,6 +647,7 @@ async function getAdminOverview() {
     generatedAt: new Date().toISOString(),
     source: "stripe",
     metrics: buildAdminMetrics(subscriptions, checkoutSessions),
+    prices,
     subscriptions,
     checkoutSessions
   };
@@ -725,6 +955,33 @@ export async function handleRequest(request, response) {
       } catch (error) {
         sendJson(response, 500, {
           error: error instanceof Error ? error.message : "Admin pregled ni uspel."
+        });
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/admin/prices/create" && request.method === "POST") {
+      if (!requireAdmin(request, response)) {
+        return;
+      }
+
+      try {
+        const payload = await readJsonBody(request);
+        const result = await createPlanPrice({
+          planKey: String(payload.planKey || "").trim(),
+          amountCents: Number(payload.amountCents),
+          currency: String(payload.currency || "eur").trim(),
+          interval: String(payload.interval || "month").trim(),
+          archiveOldPrices: payload.archiveOldPrices !== false
+        });
+
+        sendJson(response, 200, {
+          success: true,
+          ...result
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error: error instanceof Error ? error.message : "Urejanje cene ni uspelo."
         });
       }
       return;

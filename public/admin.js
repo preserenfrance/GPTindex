@@ -6,6 +6,7 @@ const clearTokenButton = document.querySelector("#clear-token");
 const refreshButton = document.querySelector("#refresh-admin");
 const feedback = document.querySelector("#admin-feedback");
 const metricsGrid = document.querySelector("#metrics-grid");
+const priceCards = document.querySelector("#price-cards");
 const subscriptionsBody = document.querySelector("#subscriptions-body");
 const checkoutBody = document.querySelector("#checkout-body");
 
@@ -75,6 +76,61 @@ function renderMetrics(metrics = {}) {
         <strong>${escapeHtml(value)}</strong>
       </article>
     `)
+    .join("");
+}
+
+function renderPrices(prices = []) {
+  if (!prices.length) {
+    priceCards.innerHTML = '<article class="price-card"><p>Ni konfiguriranih naročniških paketov.</p></article>';
+    return;
+  }
+
+  priceCards.innerHTML = prices
+    .map((item) => {
+      const amountValue = item.amountCents ? (item.amountCents / 100).toFixed(2) : "";
+      const canEdit = Boolean(item.productId || item.priceId);
+      const message = item.message
+        ? `<p class="price-warning">${escapeHtml(item.message)}</p>`
+        : "";
+
+      return `
+        <article class="price-card">
+          <div>
+            <p class="small-note">${escapeHtml(item.planKey)}</p>
+            <h3>${escapeHtml(item.planLabel)}</h3>
+            <p class="price-value">${escapeHtml(item.amountDisplay || "Ni cene")}</p>
+            <p class="small-note">
+              ${escapeHtml(item.priceId || "Ni price ID-ja")}
+              ${item.source ? ` | ${escapeHtml(item.source)}` : ""}
+            </p>
+            ${message}
+          </div>
+
+          <form class="price-form" data-plan-key="${escapeHtml(item.planKey)}">
+            <label>
+              Nova cena
+              <input name="amount" type="number" min="0.5" step="0.01" value="${escapeHtml(amountValue)}" ${canEdit ? "" : "disabled"} />
+            </label>
+            <label>
+              Valuta
+              <input name="currency" type="text" maxlength="3" value="${escapeHtml(item.currency || "eur")}" ${canEdit ? "" : "disabled"} />
+            </label>
+            <label>
+              Interval
+              <select name="interval" ${canEdit ? "" : "disabled"}>
+                <option value="month" ${item.interval === "month" ? "selected" : ""}>Mesečno</option>
+                <option value="year" ${item.interval === "year" ? "selected" : ""}>Letno</option>
+              </select>
+            </label>
+            <label class="check-row">
+              <input name="archiveOldPrices" type="checkbox" checked ${canEdit ? "" : "disabled"} />
+              <span>Arhiviraj stare aktivne cene</span>
+            </label>
+            <button type="submit" class="table-action" ${canEdit ? "" : "disabled"}>Shrani novo ceno</button>
+          </form>
+        </article>
+      `;
+    })
     .join("");
 }
 
@@ -173,7 +229,7 @@ function setLoading(nextLoading) {
   isLoading = nextLoading;
   refreshButton.disabled = isLoading;
   loginForm.querySelector("button[type='submit']").disabled = isLoading;
-  document.querySelectorAll(".table-action").forEach((button) => {
+  document.querySelectorAll(".table-action, .price-form button").forEach((button) => {
     button.disabled = isLoading;
   });
 }
@@ -185,12 +241,56 @@ async function refreshAdmin() {
     const overview = await adminFetch("/api/admin/overview");
     sessionStorage.setItem(TOKEN_KEY, getToken());
     renderMetrics(overview.metrics);
+    renderPrices(overview.prices);
     renderSubscriptions(overview.subscriptions);
     renderCheckoutSessions(overview.checkoutSessions);
     setFeedback(`Podatki osveženi: ${formatDate(overview.generatedAt)}.`, "success");
   } catch (error) {
     setFeedback(error instanceof Error ? error.message : "Admin osveževanje ni uspelo.", "error");
   } finally {
+    setLoading(false);
+  }
+}
+
+async function updatePrice(form) {
+  const planKey = form.getAttribute("data-plan-key");
+  const amount = Number(form.elements.amount.value);
+  const currency = String(form.elements.currency.value || "eur").trim().toLowerCase();
+  const interval = String(form.elements.interval.value || "month");
+  const archiveOldPrices = Boolean(form.elements.archiveOldPrices.checked);
+
+  if (!planKey || !Number.isFinite(amount) || amount < 0.5) {
+    setFeedback("Vnesi veljavno ceno, najmanj 0,50.", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Ustvarim novo Stripe ceno ${amount.toFixed(2)} ${currency.toUpperCase()} za paket ${planKey}?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    setLoading(true);
+    setFeedback("Ustvarjam novo Stripe ceno ...");
+    const result = await adminFetch("/api/admin/prices/create", {
+      method: "POST",
+      body: JSON.stringify({
+        planKey,
+        amountCents: Math.round(amount * 100),
+        currency,
+        interval,
+        archiveOldPrices
+      })
+    });
+
+    const archived = result.archivedCount ? ` Arhiviranih starih cen: ${result.archivedCount}.` : "";
+    setFeedback(`Nova cena je ustvarjena.${archived}`, "success");
+    await refreshAdmin();
+  } catch (error) {
+    setFeedback(error instanceof Error ? error.message : "Urejanje cene ni uspelo.", "error");
     setLoading(false);
   }
 }
@@ -252,6 +352,15 @@ subscriptionsBody.addEventListener("click", (event) => {
   }
 
   updateRenewal(subscriptionId, action);
+});
+
+priceCards.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!(event.target instanceof HTMLFormElement)) {
+    return;
+  }
+
+  updatePrice(event.target);
 });
 
 const storedToken = sessionStorage.getItem(TOKEN_KEY);

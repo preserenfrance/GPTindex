@@ -1,5 +1,9 @@
 const USER_AGENTS = ["ChatGPT-User", "OAI-SearchBot", "GPTBot"];
 const PAGE_PROFILES = ["general", "blog", "shop", "landing"];
+const PAGE_FETCH_TIMEOUT_MS = 10_000;
+const ROBOTS_FETCH_TIMEOUT_MS = 5_000;
+const SITEMAP_FETCH_TIMEOUT_MS = 3_000;
+const MAX_SITEMAP_CANDIDATES = 3;
 
 const RULES = [
   { id: "https", label: "Varna HTTPS dostopnost", weight: 8 },
@@ -145,14 +149,34 @@ function normalizeTarget(input) {
   return url;
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = PAGE_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      redirect: "follow",
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; GPTIndexReadinessChecker/1.0)",
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Zahteva je trajala predolgo (${Math.round(timeoutMs / 1000)}s): ${url}`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchText(url, options = {}) {
-  const response = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; GPTIndexReadinessChecker/1.0)"
-    },
-    ...options
-  });
+  const { timeoutMs = PAGE_FETCH_TIMEOUT_MS, ...fetchOptions } = options;
+  const response = await fetchWithTimeout(url, fetchOptions, timeoutMs);
 
   const text = await response.text();
   return { response, text };
@@ -432,34 +456,29 @@ export async function analyzeUrl(targetUrl, profile = "general") {
   const robotsUrl = new URL("/robots.txt", normalizedUrl.origin);
   const defaultSitemapUrl = new URL("/sitemap.xml", normalizedUrl.origin);
 
-  const pageResult = await fetchText(normalizedUrl.toString());
+  const [pageResult, robotsResult] = await Promise.all([
+    fetchText(normalizedUrl.toString(), { timeoutMs: PAGE_FETCH_TIMEOUT_MS }),
+    fetchText(robotsUrl.toString(), { timeoutMs: ROBOTS_FETCH_TIMEOUT_MS }).catch(() => null)
+  ]);
   const pageHtml = pageResult.text;
 
   let robotsText = "";
   let robotsStatus = null;
-  try {
-    const robotsResult = await fetchText(robotsUrl.toString());
+  if (robotsResult) {
     robotsStatus = robotsResult.response.status;
     if (robotsResult.response.ok) {
       robotsText = robotsResult.text;
     }
-  } catch {
-    robotsStatus = null;
   }
 
   const robotsInfo = parseRobots(robotsText, normalizedUrl.pathname);
 
   let sitemapAvailable = false;
-  const sitemapCandidates = robotsInfo.sitemaps.length > 0 ? robotsInfo.sitemaps : [defaultSitemapUrl.toString()];
+  const sitemapCandidates = (robotsInfo.sitemaps.length > 0 ? robotsInfo.sitemaps : [defaultSitemapUrl.toString()])
+    .slice(0, MAX_SITEMAP_CANDIDATES);
   for (const candidate of sitemapCandidates) {
     try {
-      const response = await fetch(candidate, {
-        method: "HEAD",
-        redirect: "follow",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; GPTIndexReadinessChecker/1.0)"
-        }
-      });
+      const response = await fetchWithTimeout(candidate, { method: "HEAD" }, SITEMAP_FETCH_TIMEOUT_MS);
       if (response.ok) {
         sitemapAvailable = true;
         break;
